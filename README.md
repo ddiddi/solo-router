@@ -139,7 +139,7 @@ Model IDs and numbers are examples. Check each provider's catalog for the models
 
 **E-STOP** routes `stop` to the safety controller and freezes the arm mid-motion.
 
-**With an API key** (set in the playground), the reason stage calls the routed hosted planner for real and the arm executes its plan. The demo loops, so each model is called once and its plan reused.
+**With an API key** (set in the playground), the reason stage calls the routed hosted planner for real, streams its plan under the stage as it is written, and the arm executes it. The demo loops, so each model is called once and its plan reused.
 
 **Run in your browser** re-routes the same task with `locations: ["browser"]`. The router then picks Florence-2 (grounding on the rendered camera frame), Qwen2.5-0.5B (writing the plan) and the scripted IK controller. The first two run for real on your GPU. Detected boxes are ray-cast onto the table to set grasp targets, and a grasp only succeeds if a cube is actually between the jaws. The first run downloads about 850 MB of weights for WebGPU while the simulated demo keeps looping; later runs load from the browser cache. The arm, scene and the default-mode models are simulated.
 

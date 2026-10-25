@@ -3,7 +3,7 @@
 // Every routing decision is real. In "Run in your browser" mode the router is
 // told it can reach browser compute, picks the ONNX models in the config, and
 // they run for real on the rendered camera frame (see onnx.js). With an API key
-// (set in the playground), a hosted planner writes the plan for real.
+// (set in the playground), a hosted planner streams the plan for real.
 
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
@@ -461,6 +461,20 @@ export function mountDemo(root, router) {
     ];
   }
 
+  // Show a planner's last two lines under the reason stage while it streams. Tokens that
+  // arrive after the run was aborted or restarted are dropped.
+  function liveOutput() {
+    const meta = stageLi("reason").querySelector(".meta");
+    const base = meta.innerHTML;
+    const g = gen;
+    let streamed = "";
+    return (tok) => {
+      if (g !== gen) return;
+      streamed += tok;
+      meta.innerHTML = `${base}<br><span class="out">${esc(streamed.trim().split("\n").slice(-2).join(" · "))}</span>`;
+    };
+  }
+
   async function cloudPlan(route, targets) {
     const spec = router.models[route.model];
     const key = loadKeys().keys[spec.provider];
@@ -468,7 +482,7 @@ export function mountDemo(root, router) {
     const cacheKey = spec.name + ":" + key;
     if (!cloudPlans.has(cacheKey)) {
       const t0 = performance.now();
-      cloudPlans.set(cacheKey, complete(router.config, spec, planMessages(targets), key, 200)
+      cloudPlans.set(cacheKey, complete(router.config, spec, planMessages(targets), key, 200, liveOutput())
         .then((text) => ({ plan: parsePlan(text), ms: Math.round(performance.now() - t0) })));
     }
     try {
@@ -489,15 +503,8 @@ export function mountDemo(root, router) {
       await sleep(Math.min(1800, 500 + route.est_latency_ms * 0.5));
       return { plan: DEFAULT_PLAN, note: "" };
     }
-    const messages = planMessages(targets);
-    const meta = stageLi("reason").querySelector(".meta");
-    const base = meta.innerHTML;
-    let streamed = "";
     const t0 = performance.now();
-    const text = await guarded(models.chat(spec, messages, (tok) => {
-      streamed += tok;
-      meta.innerHTML = `${base}<br><span class="out">${esc(streamed.trim().split("\n").slice(-2).join(" · "))}</span>`;
-    }));
+    const text = await guarded(models.chat(spec, planMessages(targets), liveOutput()));
     const ms = Math.round(performance.now() - t0);
     const plan = parsePlan(text);
     return plan.length
