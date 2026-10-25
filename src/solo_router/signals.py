@@ -21,6 +21,13 @@ class RobotRequest:
     estop: bool = False
     preference: str = "balanced"  # quality | latency | cost | balanced
     model: str = "solo/auto"
+    # Where this client can reach compute. None means onboard, edge and cloud; add "browser"
+    # when the caller can run ONNX models itself, and list its runtimes in client_runtimes.
+    locations: list[str] | None = None
+    client_runtimes: list[str] = field(default_factory=list)
+    # Signals an orchestrator already knows, e.g. {"intent": "perception"} for a perception stage.
+    # Only intent and horizon can be overridden; safety is always computed from the request.
+    overrides: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "RobotRequest":
@@ -105,6 +112,9 @@ class SignalExtractor:
         marker_hits = sum(len(rx.findall(text)) for rx in self.markers) + text.count(",")
         long = marker_hits >= self.long_markers or len(text.split()) >= self.long_words
         horizon = "long" if long else "short"
+
+        intent = req.overrides.get("intent", intent)
+        horizon = req.overrides.get("horizon", horizon)
 
         safety, reasons = "normal", []
         if req.estop:

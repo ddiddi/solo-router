@@ -13,6 +13,7 @@ const DEGRADED_CLOUD_PENALTY = 0.3;
 const LOW_BATTERY_PENALTY_PER_W = 0.01;
 const DEFAULT_LATENCY_SCALE_MS = 3000;
 const RGB_STREAMS = ["rgb", "wrist_rgb"];
+const DEFAULT_LOCATIONS = ["onboard", "edge", "cloud"];
 
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const phrase = (p) => new RegExp("(?<![a-z0-9])" + escapeRe(p.toLowerCase()) + "(?![a-z0-9])", "g");
@@ -31,12 +32,14 @@ export class Router {
     this.interactiveMs = s.latency?.interactive_ms ?? 500;
     this.lowBattery = s.energy?.low_battery_pct ?? 20;
     this.models = Object.fromEntries(config.models.map((m) => [m.name, {
-      max_hz: null, cost_per_1k: 0, power_w: 0, embodiments: ["*"], requires: [], safety_tier: 1, ...m,
+      max_hz: null, action_chunk: 1, runtimes: [], cost_per_1k: 0, power_w: 0, embodiments: ["*"], requires: [], safety_tier: 1, ...m,
     }]));
     this.decisions = [...config.decisions]
       .map((d) => ({ priority: 0, when: {}, algorithm: "static", prefer: null, ...d }))
       .sort((a, b) => b.priority - a.priority);
     this.minElevatedTier = config.guardrails?.elevated?.min_safety_tier ?? 0;
+    this.families = config.embodiment_families || {};
+    this.pipeline = config.pipeline || [];
   }
 
   signals(req) {
@@ -44,11 +47,14 @@ export class Router {
     const scores = {};
     for (const [name, rxs] of this.intents) scores[name] = rxs.filter((rx) => countMatches(rx, text) > 0).length;
     const best = Math.max(0, ...Object.values(scores));
-    const intent = best ? Object.keys(scores).find((k) => scores[k] === best) : "conversation";
+    let intent = best ? Object.keys(scores).find((k) => scores[k] === best) : "conversation";
 
     const markerHits = this.markers.reduce((n, rx) => n + countMatches(rx, text), 0) + (text.split(",").length - 1);
     const words = text.split(/\s+/).filter(Boolean).length;
-    const horizon = markerHits >= this.horizon.long_markers || words >= this.horizon.long_words ? "long" : "short";
+    let horizon = markerHits >= this.horizon.long_markers || words >= this.horizon.long_words ? "long" : "short";
+    const overrides = req.overrides || {};
+    if (overrides.intent) intent = overrides.intent;
+    if (overrides.horizon) horizon = overrides.horizon;
 
     let safety = "normal";
     let reasons = [];
@@ -89,15 +95,27 @@ export class Router {
 
   reject(m, s, req) {
     if (m.name === FAILSAFE) return null;
-    if (s.embodiment && !m.embodiments.includes("*") && !m.embodiments.includes(s.embodiment)) return `does not support embodiment ${s.embodiment}`;
+    const allowed = req.locations ?? DEFAULT_LOCATIONS;
+    if (!allowed.includes(m.location)) return `${m.location} not reachable`;
+    if (m.runtimes.length && !m.runtimes.some((r) => (req.client_runtimes || []).includes(r))) return `needs runtime ${m.runtimes.join(" or ")}`;
+    const family = this.families[s.embodiment];
+    if (s.embodiment && !m.embodiments.includes("*") && !m.embodiments.includes(s.embodiment)
+        && !(family && m.embodiments.includes(family))) return `does not support embodiment ${s.embodiment}`;
     for (const need of m.requires) {
       const have = need === "rgb" ? RGB_STREAMS : [need];
       if (!have.some((h) => s.modalities.includes(h))) return `needs ${need} observation`;
     }
     if (s.network === "offline" && m.location === "cloud") return "robot is offline";
-    if (s.latency_budget_ms != null && m.p50_latency_ms > s.latency_budget_ms) return `p50 ${fmt(m.p50_latency_ms)}ms exceeds budget ${fmt(s.latency_budget_ms)}ms`;
+    if (s.latency_budget_ms != null) {
+      const budget = s.latency_budget_ms * m.action_chunk;
+      if (m.p50_latency_ms > budget) {
+        return m.action_chunk > 1
+          ? `p50 ${fmt(m.p50_latency_ms)}ms exceeds ${m.action_chunk}-step chunk budget ${fmt(budget)}ms`
+          : `p50 ${fmt(m.p50_latency_ms)}ms exceeds budget ${fmt(budget)}ms`;
+      }
+    }
     if (req.control_hz && m.max_hz != null && m.max_hz < req.control_hz) return `max ${fmt(m.max_hz)}Hz below control rate ${fmt(req.control_hz)}Hz`;
-    if (s.safety === "elevated" && m.safety_tier < this.minElevatedTier) return `safety tier ${m.safety_tier} below required ${this.minElevatedTier}`;
+    if (s.safety === "elevated" && m.role === "action" && m.safety_tier < this.minElevatedTier) return `safety tier ${m.safety_tier} below required ${this.minElevatedTier}`;
     return null;
   }
 
@@ -119,6 +137,15 @@ export class Router {
       if (s.energy === "low") score -= LOW_BATTERY_PENALTY_PER_W * m.power_w;
       return cand(m, Math.round(score * 1e4) / 1e4);
     }).sort((a, b) => b.score - a.score);
+  }
+
+  // Route each pipeline stage (perceive -> reason -> act) for one task.
+  routeTask(req) {
+    return this.pipeline.map((stage) => {
+      const sub = { ...req, overrides: { ...(req.overrides || {}), ...(stage.signals || {}) } };
+      if (!stage.control_loop) { sub.control_hz = null; sub.latency_budget_ms = null; }
+      return { stage: stage.stage, ...this.route(sub) };
+    });
   }
 
   route(req) {
@@ -151,7 +178,7 @@ export class Router {
 
     return {
       decision: decision.name, algorithm: decision.algorithm, model: chosen.name, location: chosen.location,
-      est_latency_ms: chosen.p50_latency_ms, description: chosen.description, kind: chosen.kind,
+      est_latency_ms: chosen.p50_latency_ms, description: chosen.description, kind: chosen.kind, role: chosen.role,
       signals: s, guardrails, ranked, fallbacks, rejected, trace,
     };
   }

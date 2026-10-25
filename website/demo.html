@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SO-101 Router Demo</title>
+  <meta name="description" content="Solo Router routes one instruction through perception, reasoning and action models for a simulated SO-101 arm, optionally running ONNX models in your browser on WebGPU.">
+  <meta name="theme-color" content="#060D1A">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+      "@huggingface/transformers": "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.2.0/+esm"
+    }
+  }
+  </script>
+  <link rel="stylesheet" href="assets/style.css">
+  <style>
+    body { min-height: 100vh; display: flex; flex-direction: column; }
+    .demo-page { flex: 1; padding: 16px 0 24px; }
+    .demo-page .container { max-width: 1600px; }
+    .demo-page .demo-stage { aspect-ratio: auto; height: min(78vh, 900px); }
+    @media (max-width: 1023px) { .demo-page .demo-stage { height: 62vh; } }
+  </style>
+</head>
+<body>
+  <header class="nav scrolled" style="position:static">
+    <div class="container">
+      <a class="logo" href="./" aria-label="Solo Router home">
+        <svg viewBox="0 0 32 32" fill="none" aria-hidden="true"><rect x="1" y="1" width="30" height="30" rx="8" stroke="#1E2A3E" stroke-width="2" fill="#0D1526"/><circle cx="9" cy="16" r="3" fill="#AD94F9"/><path d="M12 16h4m0 0 5-6m-5 6 5 6m-5-6h5" stroke="#AD94F9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="23" cy="9" r="2" fill="#3C9CC4"/><circle cx="23" cy="16" r="2" fill="#3C9CC4"/><circle cx="23" cy="23" r="2" fill="#3C9CC4"/></svg>
+        solo<span>router</span>
+      </a>
+      <a class="btn btn-ghost" href="./">← Back to site</a>
+    </div>
+  </header>
+  <main class="demo-page">
+    <div class="container"><div id="demo-root"><div class="demo-loading">Loading 3D scene…</div></div></div>
+  </main>
+  <script type="module">
+    import { Router } from "./assets/router.js";
+    const root = document.getElementById("demo-root");
+    try {
+      const cfg = await (await fetch("assets/router-config.json")).json();
+      const { mountDemo } = await import("./assets/demo.js");
+      mountDemo(root, new Router(cfg));
+    } catch (err) {
+      root.innerHTML = `<div class="demo-loading">Could not start the demo: ${String(err.message).replace(/</g, "&lt;")}</div>`;
+    }
+  </script>
+</body>
+</html>

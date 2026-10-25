@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from typing import Any
 
 from .config import Decision, ModelSpec, RouterConfig
@@ -22,6 +22,7 @@ LOW_BATTERY_PENALTY_PER_W = 0.01
 DEFAULT_LATENCY_SCALE_MS = 3000.0
 # Observation streams that satisfy a model's "rgb" requirement.
 RGB_STREAMS = {"rgb", "wrist_rgb"}
+DEFAULT_LOCATIONS = ("onboard", "edge", "cloud")
 
 
 @dataclass
@@ -50,6 +51,14 @@ class RouteResult:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass
+class TaskResult:
+    stages: list[tuple[str, RouteResult]]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"stages": [{"stage": name, **route.to_dict()} for name, route in self.stages]}
 
 
 def matches(when: dict[str, Any], signals: Signals) -> bool:
@@ -135,10 +144,27 @@ class Router:
             trace=trace,
         )
 
+    def route_task(self, request: RobotRequest | dict[str, Any]) -> TaskResult:
+        """Route each configured pipeline stage (e.g. perceive -> reason -> act) for one task."""
+        if isinstance(request, dict):
+            request = RobotRequest.from_dict(request)
+        stages = []
+        for stage in self.config.pipeline:
+            sub = replace(request, overrides={**request.overrides, **stage.get("signals", {})})
+            if not stage.get("control_loop", False):
+                sub = replace(sub, control_hz=None, latency_budget_ms=None)
+            stages.append((stage["stage"], self.route(sub)))
+        return TaskResult(stages)
+
     def _reject_reason(self, spec: ModelSpec, s: Signals, req: RobotRequest) -> str | None:
         if spec.name == FAILSAFE:
             return None
-        if not spec.supports(s.embodiment):
+        allowed = req.locations if req.locations is not None else DEFAULT_LOCATIONS
+        if spec.location not in allowed:
+            return f"{spec.location} not reachable"
+        if spec.runtimes and not set(spec.runtimes) & set(req.client_runtimes):
+            return f"needs runtime {' or '.join(spec.runtimes)}"
+        if not spec.supports(s.embodiment, self.config.embodiment_families.get(s.embodiment or "")):
             return f"does not support embodiment {s.embodiment}"
         for need in spec.requires:
             have = RGB_STREAMS if need == "rgb" else {need}
@@ -146,11 +172,15 @@ class Router:
                 return f"needs {need} observation"
         if s.network == "offline" and spec.location == "cloud":
             return "robot is offline"
-        if s.latency_budget_ms is not None and spec.p50_latency_ms > s.latency_budget_ms:
-            return f"p50 {spec.p50_latency_ms:g}ms exceeds budget {s.latency_budget_ms:g}ms"
+        if s.latency_budget_ms is not None:
+            budget = s.latency_budget_ms * spec.action_chunk
+            if spec.p50_latency_ms > budget:
+                if spec.action_chunk > 1:
+                    return f"p50 {spec.p50_latency_ms:g}ms exceeds {spec.action_chunk}-step chunk budget {budget:g}ms"
+                return f"p50 {spec.p50_latency_ms:g}ms exceeds budget {budget:g}ms"
         if req.control_hz and spec.max_hz is not None and spec.max_hz < req.control_hz:
             return f"max {spec.max_hz:g}Hz below control rate {req.control_hz:g}Hz"
-        if s.safety == "elevated" and spec.safety_tier < self.min_elevated_tier:
+        if s.safety == "elevated" and spec.role == "action" and spec.safety_tier < self.min_elevated_tier:
             return f"safety tier {spec.safety_tier} below required {self.min_elevated_tier}"
         return None
 

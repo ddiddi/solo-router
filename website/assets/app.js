@@ -34,9 +34,10 @@ $$(".reveal").forEach((el) => io.observe(el));
 
 // ---------- marquee ----------
 const families = [
-  ["π0", "#AD94F9"], ["GR00T N1.5", "#3C9CC4"], ["SmolVLA", "#AD94F9"], ["OpenVLA", "#3C9CC4"], ["Octo", "#AD94F9"],
+  ["π0", "#AD94F9"], ["GR00T N1.5", "#3C9CC4"], ["SmolVLA", "#AD94F9"], ["OpenVLA", "#3C9CC4"], ["Florence-2", "#AD94F9"],
+  ["SmolVLM2", "#3C9CC4"], ["Octo", "#AD94F9"],
   ["RT-2", "#3C9CC4"], ["Qwen2.5-VL", "#AD94F9"], ["SmolLM2", "#3C9CC4"], ["Qwen3", "#AD94F9"], ["Claude", "#3C9CC4"],
-  ["Gemini Robotics", "#AD94F9"], ["LeRobot ACT", "#3C9CC4"], ["Diffusion Policy", "#AD94F9"], ["Llama", "#3C9CC4"],
+  ["Gemini Robotics", "#AD94F9"], ["LeRobot ACT", "#3C9CC4"], ["Diffusion Policy", "#AD94F9"], ["ONNX · WebGPU", "#3C9CC4"],
 ];
 const chips = families.map(([n, c]) => `<span class="chip"><i style="background:${c}"></i>${esc(n)}</span>`).join("");
 $("#marquee").innerHTML = chips + chips.replace(/<span class="chip">/g, '<span class="chip" aria-hidden="true">');
@@ -44,9 +45,9 @@ $("#marquee").innerHTML = chips + chips.replace(/<span class="chip">/g, '<span c
 // ---------- playground ----------
 const HZ = [0, 2, 5, 10, 20, 30, 50, 100, 200];
 const PRESETS = [
-  ["pick & place", "pick up the red cup and place it on the tray", { embodiment: "arm" }],
+  ["pick & place", "put the red cube in the bowl", { embodiment: "so101" }],
   ["stop!", "stop!", {}],
-  ["hand me scissors", "hand me the scissors", { embodiment: "arm", humans: true }],
+  ["hand me scissors", "hand me the scissors", { embodiment: "so101", humans: true }],
   ["humanoid fold", "fold the towel", { embodiment: "humanoid" }],
   ["patrol", "patrol the warehouse aisle", { embodiment: "quadruped", obs: ["lidar"] }],
   ["chore", "clean the kitchen, then load the dishwasher and finally wipe the counters", { embodiment: "mobile_manipulator", hz: 0 }],
@@ -141,7 +142,7 @@ function applyPreset([, text, opts]) {
   pressed($("#estop"), false);
   const obs = opts.obs || ["rgb", "proprio"];
   $$("#obs .toggle").forEach((b) => pressed(b, obs.includes(b.dataset.v)));
-  $("#hz").value = opts.hz === 0 ? 0 : 4;
+  $("#hz").value = opts.hz === 0 ? 0 : 5;
   render();
 }
 
@@ -163,5 +164,46 @@ fetch("assets/router-config.json")
     set("decisions", cfg.decisions.length);
     set("models", cfg.models.length);
     render();
+    renderRoles(cfg);
+    mountDemoWhenNear();
   })
   .catch((err) => { $("#r-trace").textContent = "could not load router config: " + err; });
+
+// ---------- default model set, grouped by role ----------
+const ROLE_INFO = {
+  perception: ["01", "Perception", "See", "Find, box and describe what is in front of the robot."],
+  reasoning: ["02", "Reasoning", "Think", "Plan multi-step tasks, explain, diagnose."],
+  action: ["03", "Action", "Move", "Policies that output joint and base commands."],
+};
+function renderRoles(cfg) {
+  const card = (m) => `
+    <div class="model-card">
+      <div class="model-top"><b>${esc(m.name)}</b><span class="badge ${m.location}">${m.location === "browser" ? "browser · " + esc((m.runtimes || []).join("/")) : m.location}</span></div>
+      <p>${esc(m.description || "")}</p>
+      <div class="model-meta"><span>${esc(m.kind)}</span><span>~${m.p50_latency_ms} ms</span>${m.action_chunk > 1 ? `<span>chunk ${m.action_chunk}</span>` : ""}${m.onnx ? `<span class="onnx">ONNX</span>` : ""}</div>
+    </div>`;
+  $("#roles").innerHTML = Object.entries(ROLE_INFO).map(([role, [n, title, verb, blurb]]) => `
+    <div class="role reveal in">
+      <div class="role-head"><span class="role-num">${n}</span><div><h3>${title} <em>· ${verb}</em></h3><p>${blurb}</p></div></div>
+      ${cfg.models.filter((m) => m.role === role).map(card).join("")}
+    </div>`).join("");
+  const fs = cfg.models.find((m) => m.role === "safety");
+  if (fs) $("#failsafe").innerHTML = `<span class="badge critical">safety</span> <b>${esc(fs.name)}</b> · ${esc(fs.description)} Every fallback chain ends here.`;
+}
+
+// ---------- SO-101 demo (three.js loads only when the section is near) ----------
+function mountDemoWhenNear() {
+  const el = $("#demo-root");
+  if (!el) return;
+  const obs = new IntersectionObserver(async ([e]) => {
+    if (!e.isIntersecting) return;
+    obs.disconnect();
+    try {
+      const { mountDemo } = await import("./demo.js");
+      mountDemo(el, router);
+    } catch (err) {
+      el.innerHTML = `<div class="demo-loading">Could not start the 3D demo (${esc(err.message)}). It needs WebGL and access to cdn.jsdelivr.net.</div>`;
+    }
+  }, { rootMargin: "400px" });
+  obs.observe(el);
+}

@@ -1,7 +1,7 @@
 version: v0.1
 
 # Solo Router: a semantic decision layer for robots.
-# Every request flows through four stages:
+# Every request flows through four steps:
 #   signals   -> what is being asked, by which robot, under which constraints
 #   decisions -> which policy family should handle it (first match by priority)
 #   algorithms-> which concrete model within that family, given latency/location/safety
@@ -20,7 +20,7 @@ signals:
     # instruction; the highest score wins, ties go to the earlier intent.
     manipulation: [pick, pick up, place, put, grasp, grab, hold, release, fold, pour, open, close,
                    insert, stack, wipe, push, pull, twist, screw, unscrew, hand me, lift, drop,
-                   sort, peg, drawer, cup, towel, block, gripper]
+                   sort, peg, drawer, cup, towel, block, cube, gripper]
     navigation: [go to, navigate, move to, drive, walk, follow, dock, return to, explore, patrol,
                  map, turn left, turn right, come here, go back, waypoint, hallway, room, aisle]
     perception: [what do you see, describe, detect, count, inspect, identify, find, where is,
@@ -51,41 +51,171 @@ signals:
   energy:
     low_battery_pct: 20
 
+# Specific robots inherit the policies trained for their embodiment family.
+embodiment_families:
+  so101: arm
+  so100: arm
+  koch: arm
+  piper: arm
+  aloha: bimanual
+  lekiwi: mobile_manipulator
+  unitree_g1: humanoid
+  unitree_go2: quadruped
+
+# The default model set, grouped by role:
+#   perception -> see:   find and describe what is in front of the robot
+#   reasoning  -> think: plan, explain, diagnose
+#   action     -> move:  policies that output joint or base commands
+#   safety     -> stop:  the deterministic fail-safe every route ends in
+# Latency and quality numbers are illustrative. Measure your own hardware.
 models:
-  - name: safety-controller
-    kind: safety
+  # ---------------- perception ----------------
+  - name: florence-2-base
+    role: perception
+    kind: detector
     location: onboard
-    p50_latency_ms: 2
-    max_hz: 1000
-    quality: 1.0
-    cost_per_1k: 0
+    p50_latency_ms: 70
+    quality: 0.60
+    power_w: 12
     embodiments: ["*"]
-    requires: []
-    safety_tier: 3
-    description: Deterministic stop / hold-position controller. Never a learned model.
+    requires: [rgb]
+    base_url: http://127.0.0.1:8201
+    description: 0.23B open-vocabulary detector; finds and boxes objects by name.
+
+  - name: smolvlm2-2.2b
+    role: perception
+    kind: vlm
+    location: onboard
+    p50_latency_ms: 260
+    quality: 0.64
+    power_w: 15
+    embodiments: ["*"]
+    requires: [rgb]
+    base_url: http://127.0.0.1:8202/v1
+    api_format: openai
+    description: Small VLM that answers questions about the scene without a network.
+
+  - name: qwen2.5-vl-7b
+    role: perception
+    kind: vlm
+    location: edge
+    p50_latency_ms: 380
+    quality: 0.76
+    cost_per_1k: 0.05
+    embodiments: ["*"]
+    requires: [rgb]
+    base_url: http://edge.local:8000/v1
+    api_format: openai
+    description: Open VLM on the edge box for grounding, counting and reading gauges.
+
+  - name: florence-2-base-web
+    role: perception
+    kind: detector
+    location: browser
+    p50_latency_ms: 650
+    quality: 0.60
+    embodiments: ["*"]
+    requires: [rgb]
+    runtimes: [webgpu, wasm]
+    onnx:
+      hf_id: onnx-community/Florence-2-base-ft
+      task: "<CAPTION_TO_PHRASE_GROUNDING>"
+      dtype:
+        webgpu: { embed_tokens: fp16, vision_encoder: fp16, encoder_model: q4, decoder_model_merged: q4 }
+        wasm: { embed_tokens: fp32, vision_encoder: fp32, encoder_model: q4, decoder_model_merged: q4 }
+    description: Florence-2 as ONNX, running in the browser on WebGPU (WASM fallback).
+
+  # ---------------- reasoning ----------------
+  - name: smollm2-1.7b
+    role: reasoning
+    kind: llm
+    location: onboard
+    p50_latency_ms: 140
+    quality: 0.50
+    power_w: 8
+    embodiments: ["*"]
+    base_url: http://127.0.0.1:8106/v1
+    api_format: openai
+    description: Small language model for chat, status and log triage on the robot.
+
+  - name: qwen3-8b
+    role: reasoning
+    kind: planner
+    location: edge
+    p50_latency_ms: 900
+    quality: 0.72
+    cost_per_1k: 0.08
+    embodiments: ["*"]
+    base_url: http://edge.local:8001/v1
+    api_format: openai
+    description: Offline-capable task planner that breaks instructions into skills.
+
+  - name: claude-sonnet-5-5
+    role: reasoning
+    kind: planner
+    location: cloud
+    p50_latency_ms: 2400
+    quality: 0.95
+    cost_per_1k: 4.0
+    embodiments: ["*"]
+    safety_tier: 2
+    base_url: https://api.anthropic.com/v1
+    api_format: anthropic
+    api_key_env: ANTHROPIC_API_KEY
+    description: Frontier cloud model for long-horizon, open-ended planning.
+
+  - name: qwen2.5-0.5b-web
+    role: reasoning
+    kind: llm
+    location: browser
+    p50_latency_ms: 900
+    quality: 0.45
+    embodiments: ["*"]
+    runtimes: [webgpu, wasm]
+    onnx:
+      hf_id: onnx-community/Qwen2.5-0.5B-Instruct
+      task: text-generation
+      dtype: { webgpu: q4f16, wasm: q4 }
+    description: Qwen2.5-0.5B as ONNX, planning skills in the browser on WebGPU.
+
+  # ---------------- action ----------------
+  - name: act-so101
+    role: action
+    kind: policy
+    location: onboard
+    p50_latency_ms: 12
+    max_hz: 50
+    action_chunk: 100
+    quality: 0.58
+    power_w: 6
+    embodiments: [so101, so100]
+    requires: [rgb]
+    base_url: http://127.0.0.1:8100
+    description: LeRobot ACT policy trained on SO-101 demonstrations. Tiny, fast, task-specific.
 
   - name: smolvla-450m
+    role: action
     kind: vla
     location: onboard
     p50_latency_ms: 28
     max_hz: 30
+    action_chunk: 50
     quality: 0.62
-    cost_per_1k: 0
     power_w: 15
     embodiments: [arm, bimanual]
     requires: [rgb]
-    safety_tier: 1
     base_url: http://127.0.0.1:8101
     description: Compact vision-language-action policy that fits on a Jetson-class board.
 
   - name: pi0-3b
+    role: action
     kind: vla
     location: edge
     p50_latency_ms: 45
     max_hz: 50
+    action_chunk: 50
     quality: 0.82
     cost_per_1k: 0.02
-    power_w: 0
     embodiments: [arm, bimanual, mobile_manipulator]
     requires: [rgb]
     safety_tier: 2
@@ -93,6 +223,7 @@ models:
     description: Flow-matching VLA with action chunking for dexterous manipulation.
 
   - name: openvla-7b
+    role: action
     kind: vla
     location: edge
     p50_latency_ms: 170
@@ -101,15 +232,16 @@ models:
     cost_per_1k: 0.03
     embodiments: [arm]
     requires: [rgb]
-    safety_tier: 1
     base_url: http://edge.local:8103
-    description: Open 7B VLA; strong generalization, slower control rate.
+    description: Open 7B VLA; strong generalization, one action per call.
 
   - name: gr00t-n1.5-3b
+    role: action
     kind: vla
     location: edge
     p50_latency_ms: 40
     max_hz: 30
+    action_chunk: 16
     quality: 0.80
     cost_per_1k: 0.02
     embodiments: [humanoid, bimanual]
@@ -119,72 +251,39 @@ models:
     description: Humanoid foundation policy for whole-body and bimanual tasks.
 
   - name: nav-policy-onboard
+    role: action
     kind: nav
     location: onboard
     p50_latency_ms: 18
     max_hz: 50
     quality: 0.66
-    cost_per_1k: 0
     power_w: 10
     embodiments: [mobile_manipulator, amr, quadruped, humanoid, drone]
-    requires: []
     safety_tier: 2
     base_url: http://127.0.0.1:8105
     description: Goal-conditioned visual navigation policy running on the robot.
 
-  - name: qwen2.5-vl-7b
-    kind: vlm
-    location: edge
-    p50_latency_ms: 380
-    quality: 0.76
-    cost_per_1k: 0.05
-    embodiments: ["*"]
-    requires: [rgb]
-    safety_tier: 1
-    base_url: http://edge.local:8000/v1
-    api_format: openai
-    description: Open VLM for scene description, detection, and gauge reading on the edge box.
+  - name: so101-ik-web
+    role: action
+    kind: controller
+    location: browser
+    p50_latency_ms: 1
+    max_hz: 1000
+    quality: 0.35
+    embodiments: [so101]
+    description: Scripted inverse-kinematics skill executor for the simulated SO-101. Not a learned policy.
 
-  - name: smollm2-1.7b
-    kind: llm
+  # ---------------- safety ----------------
+  - name: safety-controller
+    role: safety
+    kind: safety
     location: onboard
-    p50_latency_ms: 140
-    quality: 0.50
-    cost_per_1k: 0
-    power_w: 8
+    p50_latency_ms: 2
+    max_hz: 1000
+    quality: 1.0
     embodiments: ["*"]
-    requires: []
-    safety_tier: 1
-    base_url: http://127.0.0.1:8106/v1
-    api_format: openai
-    description: Small language model for chat, status, and log triage without a network.
-
-  - name: qwen3-8b
-    kind: planner
-    location: edge
-    p50_latency_ms: 900
-    quality: 0.72
-    cost_per_1k: 0.08
-    embodiments: ["*"]
-    requires: []
-    safety_tier: 1
-    base_url: http://edge.local:8001/v1
-    api_format: openai
-    description: Offline-capable task planner that decomposes instructions into skills.
-
-  - name: claude-sonnet-5-5
-    kind: planner
-    location: cloud
-    p50_latency_ms: 2400
-    quality: 0.95
-    cost_per_1k: 4.0
-    embodiments: ["*"]
-    requires: []
-    safety_tier: 2
-    base_url: https://api.anthropic.com/v1
-    api_format: anthropic
-    api_key_env: ANTHROPIC_API_KEY
-    description: Frontier cloud planner for long-horizon, open-ended tasks.
+    safety_tier: 3
+    description: Deterministic stop / hold-position controller. Never a learned model.
 
 decisions:
   - name: emergency_stop
@@ -196,7 +295,7 @@ decisions:
   - name: realtime_manipulation
     priority: 300
     when: { intent: manipulation, horizon: short }
-    candidates: [pi0-3b, gr00t-n1.5-3b, smolvla-450m, openvla-7b]
+    candidates: [pi0-3b, gr00t-n1.5-3b, smolvla-450m, act-so101, openvla-7b, so101-ik-web]
     algorithm: latency_aware
 
   - name: navigation
@@ -208,13 +307,13 @@ decisions:
   - name: long_horizon_task
     priority: 200
     when: { any: [{ intent: planning }, { horizon: long }] }
-    candidates: [claude-sonnet-5-5, qwen3-8b, smollm2-1.7b]
+    candidates: [claude-sonnet-5-5, qwen3-8b, smollm2-1.7b, qwen2.5-0.5b-web]
     algorithm: hybrid
 
   - name: scene_understanding
     priority: 150
     when: { intent: perception }
-    candidates: [qwen2.5-vl-7b, claude-sonnet-5-5]
+    candidates: [florence-2-base, smolvlm2-2.2b, qwen2.5-vl-7b, claude-sonnet-5-5, florence-2-base-web]
     algorithm: hybrid
 
   - name: diagnostics
@@ -230,6 +329,18 @@ decisions:
     candidates: [smollm2-1.7b, qwen3-8b, claude-sonnet-5-5]
     algorithm: hybrid
     prefer: latency
+
+# /v1/task and `solo-router task`: route one instruction through every stage.
+# `signals` fixes what the stage is for; `control_loop` keeps the control-rate
+# deadline (only the stage that moves the robot needs it).
+pipeline:
+  - stage: perceive
+    signals: { intent: perception, horizon: short }
+  - stage: reason
+    signals: { intent: planning }
+  - stage: act
+    signals: { intent: manipulation, horizon: short }
+    control_loop: true
 
 guardrails:
   # Attached to any decision whose safety signal is "elevated".

@@ -7,7 +7,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-LOCATIONS = ("onboard", "edge", "cloud")
+# "browser" models run client-side through ONNX Runtime Web (WebGPU, or WASM as a fallback).
+LOCATIONS = ("onboard", "edge", "cloud", "browser")
+ROLES = ("perception", "reasoning", "action", "safety")
 ALGORITHMS = ("static", "latency_aware", "hybrid")
 
 
@@ -19,10 +21,14 @@ class ConfigError(ValueError):
 class ModelSpec:
     name: str
     kind: str
+    role: str
     location: str
     p50_latency_ms: float
     quality: float
     max_hz: float | None = None
+    # Steps of motion predicted per inference call. A chunked policy only has to
+    # answer once per chunk, so its latency budget is chunk * (1000 / control_hz).
+    action_chunk: int = 1
     cost_per_1k: float = 0.0
     power_w: float = 0.0
     embodiments: list[str] = field(default_factory=lambda: ["*"])
@@ -31,10 +37,16 @@ class ModelSpec:
     base_url: str | None = None
     api_format: str | None = None
     api_key_env: str | None = None
+    # Client runtimes the model needs, any one of which suffices (e.g. webgpu, wasm). Empty: none.
+    runtimes: list[str] = field(default_factory=list)
+    # How a browser loads it: {"hf_id": ..., "task": ..., "dtype": ...} for transformers.js.
+    onnx: dict[str, Any] | None = None
     description: str = ""
 
-    def supports(self, embodiment: str | None) -> bool:
-        return embodiment is None or "*" in self.embodiments or embodiment in self.embodiments
+    def supports(self, embodiment: str | None, family: str | None = None) -> bool:
+        if embodiment is None or "*" in self.embodiments:
+            return True
+        return embodiment in self.embodiments or (family is not None and family in self.embodiments)
 
 
 @dataclass
@@ -55,14 +67,23 @@ class RouterConfig:
     guardrails: dict[str, Any]
     listener: dict[str, Any]
     raw: dict[str, Any]
+    # Specific robots mapped to the embodiment family policies are trained for, e.g. so101 -> arm.
+    embodiment_families: dict[str, str] = field(default_factory=dict)
+    # Ordered stages for /v1/task: each forces some signals and routes independently.
+    pipeline: list[dict[str, Any]] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "RouterConfig":
         models: dict[str, ModelSpec] = {}
         for entry in data.get("models", []):
-            spec = ModelSpec(**entry)
+            try:
+                spec = ModelSpec(**entry)
+            except TypeError as exc:
+                raise ConfigError(f"model {entry.get('name', '?')}: {exc}") from None
             if spec.location not in LOCATIONS:
                 raise ConfigError(f"model {spec.name}: unknown location {spec.location!r}")
+            if spec.role not in ROLES:
+                raise ConfigError(f"model {spec.name}: unknown role {spec.role!r}")
             if spec.name in models:
                 raise ConfigError(f"duplicate model {spec.name}")
             models[spec.name] = spec
@@ -95,6 +116,8 @@ class RouterConfig:
             guardrails=data.get("guardrails", {}),
             listener=data.get("listener", {}),
             raw=data,
+            embodiment_families=data.get("embodiment_families", {}),
+            pipeline=data.get("pipeline", []),
         )
 
 

@@ -47,7 +47,7 @@ class App:
     def models(self) -> dict[str, Any]:
         data = [{"id": AUTO_MODEL, "object": "model", "owned_by": "solo-router"}]
         data += [
-            {"id": m.name, "object": "model", "owned_by": m.location, "kind": m.kind}
+            {"id": m.name, "object": "model", "owned_by": m.location, "role": m.role, "kind": m.kind}
             for m in self.router.config.models.values()
         ]
         return {"object": "list", "data": data}
@@ -55,6 +55,11 @@ class App:
     def route(self, body: dict[str, Any]) -> tuple[int, dict[str, Any], dict[str, str]]:
         result = self.router.route(RobotRequest.from_dict(body))
         return 200, result.to_dict(), _decision_headers(result)
+
+    def task(self, body: dict[str, Any]) -> tuple[int, dict[str, Any], dict[str, str]]:
+        task = self.router.route_task(RobotRequest.from_dict(body))
+        headers = {f"x-solo-router-{stage}": route.model for stage, route in task.stages}
+        return 200, task.to_dict(), headers
 
     def chat(self, body: dict[str, Any]) -> tuple[int, dict[str, Any], dict[str, str]]:
         req = RobotRequest.from_openai(body)
@@ -139,7 +144,8 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                 self._send(404, {"error": {"message": f"no route for GET {self.path}"}})
 
         def do_POST(self) -> None:  # noqa: N802
-            routes = {"/v1/route": app.route, "/v1/chat/completions": app.chat, "/v1/actions": app.actions}
+            routes = {"/v1/route": app.route, "/v1/chat/completions": app.chat, "/v1/actions": app.actions,
+                      "/v1/task": app.task}
             handler = routes.get(self.path)
             if handler is None:
                 self._send(404, {"error": {"message": f"no route for POST {self.path}"}})

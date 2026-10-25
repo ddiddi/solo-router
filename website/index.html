@@ -12,6 +12,15 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+      "@huggingface/transformers": "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.2.0/+esm"
+    }
+  }
+  </script>
   <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
@@ -34,10 +43,11 @@
       solo<span>router</span>
     </a>
     <nav class="nav-links" aria-label="Main">
+      <a href="#demo">Demo</a>
+      <a href="#models">Models</a>
       <a href="#playground">Playground</a>
       <a href="#architecture">Architecture</a>
       <a href="#safety">Safety</a>
-      <a href="#research">Research</a>
       <a href="https://github.com/ddiddi/solo-router#readme">Docs</a>
       <a href="https://github.com/ddiddi/solo-router">GitHub</a>
       <span class="divider"></span>
@@ -52,6 +62,8 @@
   <button class="close" id="menu-close" aria-label="Close menu">
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
   </button>
+  <a href="#demo">Demo</a>
+  <a href="#models">Models</a>
   <a href="#playground">Playground</a>
   <a href="#architecture">Architecture</a>
   <a href="#safety">Safety</a>
@@ -69,7 +81,7 @@
       <h1>Every action.<br><span class="grad">The right policy.</span></h1>
       <p class="sub">An open, programmable decision layer for robots. Solo Router sends each instruction to the best-fit VLA, planner, VLM, or safety controller — across onboard, edge, and cloud compute.</p>
       <div class="ctas">
-        <a class="btn btn-primary btn-lg" href="#playground">Try the Playground →</a>
+        <a class="btn btn-primary btn-lg" href="#demo">Watch the SO-101 demo →</a>
         <button class="btn btn-ghost btn-lg btn-cmd" data-copy="pip install git+https://github.com/ddiddi/solo-router">
           <span class="prompt">$</span> pip install solo-router <span class="copied" hidden>copied</span>
         </button>
@@ -82,8 +94,21 @@
     </div>
   </section>
 
+  <!-- DEMO -->
+  <section id="demo" class="alt">
+    <div class="container">
+      <div class="section-head reveal">
+        <div class="kicker">Live demo</div>
+        <h2>Perceive. Reason. Act.</h2>
+        <p>One instruction, three routing decisions, one SO-101 arm. Watch the router pick a perception model, a planner and a policy, or switch to running real ONNX models on your own GPU.</p>
+      </div>
+      <div id="demo-root" class="demo-mount"><div class="demo-loading">Loading 3D scene…</div></div>
+      <p class="demo-links"><a href="demo.html">Open full screen ↗</a></p>
+    </div>
+  </section>
+
   <!-- WHY -->
-  <section class="alt">
+  <section>
     <div class="container">
       <div class="section-head reveal">
         <div class="kicker">Why a router</div>
@@ -112,6 +137,19 @@
           <p>An arm, a humanoid and a quadruped need different policies. Routing matches each request to models trained for that body.</p>
         </div>
       </div>
+    </div>
+  </section>
+
+  <!-- MODELS -->
+  <section id="models" class="alt">
+    <div class="container">
+      <div class="section-head reveal">
+        <div class="kicker">Default model set</div>
+        <h2>See. Think. Move.</h2>
+        <p>The router ships with a model pool grouped by role. Each request uses the model in the role it needs, on whatever compute it can reach, including your browser.</p>
+      </div>
+      <div class="roles" id="roles"></div>
+      <div class="failsafe reveal" id="failsafe"></div>
     </div>
   </section>
 
@@ -177,7 +215,9 @@ fallbacks: smolvla-450m -> safety-controller</span>
             <div class="field">
               <label for="embodiment">Embodiment</label>
               <select id="embodiment">
-                <option value="arm">arm</option>
+                <option value="so101">SO-101</option>
+                <option value="arm">arm (generic)</option>
+                <option value="koch">Koch</option>
                 <option value="bimanual">bimanual</option>
                 <option value="mobile_manipulator">mobile manipulator</option>
                 <option value="humanoid">humanoid</option>
@@ -208,7 +248,7 @@ fallbacks: smolvla-450m -> safety-controller</span>
           </div>
           <div class="field">
             <label for="hz">Control rate <span class="range-val" id="hz-val"></span></label>
-            <input type="range" id="hz" min="0" max="8" step="1" value="4">
+            <input type="range" id="hz" min="0" max="8" step="1" value="5">
           </div>
           <div class="field">
             <span class="label">Network</span>
