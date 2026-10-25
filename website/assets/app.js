@@ -87,8 +87,10 @@ function flash(id, text) {
   }
 }
 
+let runId = 0; // bumps when inputs change, so a stream still in flight stops writing
+
 function render(keepAnswer = false) {
-  if (!keepAnswer) $("#r-answer").hidden = true;
+  if (!keepAnswer) { $("#r-answer").hidden = true; runId++; }
   $("#hz-val").textContent = HZ[+$("#hz").value] ? `${HZ[+$("#hz").value]} Hz · ${(1000 / HZ[+$("#hz").value]).toFixed(0)} ms budget` : "no control loop";
   $("#battery-val").textContent = `${$("#battery").value}%`;
   if (!router) return;
@@ -188,9 +190,21 @@ async function run() {
       { role: "system", content: "You are the reasoning model behind a robot router. Answer briefly. For tasks, reply with a short numbered plan of robot skills." },
       { role: "user", content: $("#instruction").value },
     ];
-    const text = await complete(router.config, spec, messages, key);
-    const s = ((performance.now() - t0) / 1000).toFixed(1);
-    answer(`<span class="answer-head">${esc(r.model)} · ${esc(label)} · ${s}s${esc(note)}</span>${esc(text.trim() || "(empty reply)")}`);
+    const head = (status) => `<span class="answer-head">${esc(r.model)} · ${esc(label)} · ${status}${esc(note)}</span>`;
+    let first = 0;
+    let streamed = "";
+    const id = runId;
+    const text = await complete(router.config, spec, messages, key, 512, (piece) => {
+      if (id !== runId) return;
+      first ||= performance.now();
+      streamed += piece;
+      // Re-render from the accumulated text so markup in the reply stays escaped.
+      answer(head("streaming…") + esc(streamed.trimStart()));
+    });
+    if (id !== runId) return;
+    const secs = (ms) => (ms / 1000).toFixed(1);
+    const done = performance.now();
+    answer(head(`${secs(done - t0)}s${first ? ` · first token ${secs(first - t0)}s` : ""}`) + esc(text.trim() || "(empty reply)"));
   } catch (e) {
     answer(esc(e.message), "error");
   } finally {

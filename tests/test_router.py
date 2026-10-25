@@ -336,3 +336,127 @@ def test_proxy_uses_provider_key_and_falls_back(monkeypatch):
     finally:
         httpd.shutdown()
         up.shutdown()
+
+
+def _read_sse(resp):
+    events = [line[6:] for line in resp.read().decode().splitlines() if line.startswith("data: ")]
+    assert events[-1] == "[DONE]"
+    return [json.loads(e) for e in events[:-1]]
+
+
+def _text(chunks):
+    return "".join(c["choices"][0]["delta"].get("content") or "" for c in chunks if c.get("choices"))
+
+
+class _StreamingUpstream:
+    """Fake OpenAI and Anthropic endpoints that stream, or fail for models in `fail`."""
+
+    def __init__(self, fail=()):
+        from http.server import BaseHTTPRequestHandler
+
+        calls = self.calls = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self):  # noqa: N802
+                body = json.loads(self.rfile.read(int(self.headers["content-length"])))
+                calls.append((self.path, body["model"], body.get("stream")))
+                if body["model"] in fail:
+                    self.send_response(503)
+                    self.end_headers()
+                    return
+                self.send_response(200)
+                self.send_header("content-type", "text/event-stream")
+                self.end_headers()
+                if self.path == "/messages":
+                    events = [{"type": "message_start"},
+                              {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "pick "}},
+                              {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "up"}},
+                              {"type": "message_delta", "delta": {"stop_reason": "end_turn"}},
+                              {"type": "message_stop"}]
+                    out = "".join(f"event: {e['type']}\ndata: {json.dumps(e)}\n\n" for e in events)
+                else:
+                    deltas = [{"role": "assistant", "content": ""}, {"content": "1. "}, {"content": "wipe"}]
+                    out = "".join(f"data: {json.dumps({'choices': [{'index': 0, 'delta': d}]})}\n\n" for d in deltas)
+                    out += "data: [DONE]\n\n"
+                self.wfile.write(out.encode())
+
+            def log_message(self, *a):
+                pass
+
+        self.httpd, self.url = _serve(Handler)
+
+
+@pytest.fixture
+def stream_app(monkeypatch):
+    def make(fail=(), keys=None, dry_run=False):
+        upstream = _StreamingUpstream(fail)
+        data = load_config(default_config_path()).raw
+        data = {**data, "providers": {k: {**v, "base_url": upstream.url} for k, v in data["providers"].items()}}
+        monkeypatch.setenv("SOLO_ROUTER_QUIET", "1")
+        for env in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "NEBIUS_API_KEY"):
+            monkeypatch.delenv(env, raising=False)
+        httpd, base = _serve(make_handler(App(Router(RouterConfig.from_dict(data)), dry_run=dry_run, keys=keys)))
+        servers.extend([httpd, upstream.httpd])
+        return upstream, base
+
+    servers = []
+    yield make
+    for s in servers:
+        s.shutdown()
+
+
+def _stream_chat(base, text, **extra):
+    body = json.dumps({"model": "solo/auto", "stream": True, "messages": [{"role": "user", "content": text}],
+                       **extra}).encode()
+    return urllib.request.urlopen(urllib.request.Request(base + "/v1/chat/completions", data=body))
+
+
+def test_proxy_streams_openai_compatible(stream_app):
+    upstream, base = stream_app(keys={"nebius": "nb"})
+    with _stream_chat(base, CHORE) as resp:
+        assert resp.headers["content-type"] == "text/event-stream"
+        assert resp.headers["x-solo-router-model"] == "nebius/gpt-oss-120b"
+        chunks = _read_sse(resp)
+    assert upstream.calls == [("/chat/completions", "openai/gpt-oss-120b", True)]
+    assert _text(chunks) == "1. wipe"
+    assert all(c["model"] == "nebius/gpt-oss-120b" for c in chunks)
+    assert chunks[-1]["solo_router"]["served_by"] == "nebius/gpt-oss-120b"
+
+
+def test_proxy_translates_anthropic_stream(stream_app):
+    _, base = stream_app(keys={"anthropic": "ak"})
+    with _stream_chat(base, CHORE) as resp:
+        chunks = _read_sse(resp)
+    assert chunks[0]["choices"][0]["delta"]["role"] == "assistant"
+    assert _text(chunks) == "pick up"
+    assert [c["choices"][0]["finish_reason"] for c in chunks if c.get("choices")][-1] == "stop"
+    assert all(c["object"] == "chat.completion.chunk" for c in chunks)
+
+
+def test_stream_falls_back_before_first_byte(stream_app):
+    upstream, base = stream_app(fail={"openai/gpt-oss-120b"}, keys={"nebius": "nb", "anthropic": "ak"})
+    with _stream_chat(base, CHORE) as resp:
+        assert resp.headers["x-solo-router-model"] == "anthropic/claude-sonnet-5-5"
+        chunks = _read_sse(resp)
+    assert [c[1] for c in upstream.calls] == ["openai/gpt-oss-120b", "claude-sonnet-5-5"]
+    assert _text(chunks) == "pick up"
+    assert chunks[-1]["solo_router"]["attempts"][0]["model"] == "nebius/gpt-oss-120b"
+
+
+def test_dry_run_streams_the_decision(stream_app):
+    upstream, base = stream_app(dry_run=True)
+    with _stream_chat(base, "stop") as resp:
+        chunks = _read_sse(resp)
+    assert upstream.calls == []
+    assert "emergency_stop -> safety-controller" in _text(chunks)
+
+
+def test_stream_error_midway_becomes_error_event():
+    from solo_router.server import _sse
+
+    def broken():
+        yield {"choices": [{"index": 0, "delta": {"content": "par"}}]}
+        raise ValueError("connection reset")
+
+    events = [e.decode() for e in _sse(broken(), {"model": "m"})]
+    assert "stream interrupted: connection reset" in events[-2] and events[-1] == "data: [DONE]\n\n"

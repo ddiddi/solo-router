@@ -123,8 +123,11 @@ def _run(router: Router, args: argparse.Namespace) -> int:
     robot = {k: v for k, v in vars(req).items() if k not in ("instruction", "model", "overrides")}
     if not args.local:
         robot["locations"] = ["cloud"]
-    status, resp, _ = app.chat({"model": "solo/auto", "robot": robot,
-                                "messages": [{"role": "user", "content": args.instruction}]}, {})
+    body = {"model": "solo/auto", "robot": robot, "messages": [{"role": "user", "content": args.instruction}],
+            "stream": not args.json}
+    status, resp, headers = app.chat(body, {})
+    if status == 200 and not isinstance(resp, dict):
+        return _print_stream(resp, headers)
     if args.json:
         print(json.dumps(resp, indent=2))
         return 0 if status == 200 else 1
@@ -138,6 +141,23 @@ def _run(router: Router, args: argparse.Namespace) -> int:
     location = router.config.models[served].location
     print(f"[{info['decision']} -> {served} @ {location}]", file=sys.stderr)
     print(resp["choices"][0]["message"]["content"])
+    return 0
+
+
+def _print_stream(events, headers: dict[str, str]) -> int:
+    print(f"[{headers['x-solo-router-decision']} -> {headers['x-solo-router-model']} "
+          f"@ {headers['x-solo-router-location']}]", file=sys.stderr, flush=True)
+    for event in events:
+        data = event.decode().removeprefix("data: ").strip()
+        if data == "[DONE]":
+            break
+        chunk = json.loads(data)
+        if "error" in chunk:
+            print(f"\nerror: {chunk['error']['message']}", file=sys.stderr)
+            return 1
+        for choice in chunk.get("choices", []):
+            print(choice["delta"].get("content") or "", end="", flush=True)
+    print()
     return 0
 
 

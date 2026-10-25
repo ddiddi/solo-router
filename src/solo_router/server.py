@@ -12,6 +12,7 @@ import urllib.error
 import urllib.request
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from collections.abc import Iterator
 from typing import Any
 
 from .router import RouteResult, Router
@@ -76,11 +77,14 @@ def _to_anthropic(body: dict[str, Any], model: str) -> dict[str, Any]:
     return out
 
 
+ANTHROPIC_STOP = {"end_turn": "stop", "stop_sequence": "stop", "max_tokens": "length"}
+
+
 def _from_anthropic(resp: dict[str, Any]) -> dict[str, Any]:
     """Anthropic Messages response -> OpenAI chat.completion."""
     text = "".join(b.get("text", "") for b in resp.get("content", []) if b.get("type") == "text")
     usage = resp.get("usage") or {}
-    stop = {"end_turn": "stop", "stop_sequence": "stop", "max_tokens": "length"}.get(resp.get("stop_reason"), "stop")
+    stop = ANTHROPIC_STOP.get(resp.get("stop_reason"), "stop")
     return {
         "id": resp.get("id") or f"chatcmpl-{uuid.uuid4().hex[:24]}",
         "object": "chat.completion",
@@ -90,6 +94,75 @@ def _from_anthropic(resp: dict[str, Any]) -> dict[str, Any]:
         "usage": {"prompt_tokens": usage.get("input_tokens", 0), "completion_tokens": usage.get("output_tokens", 0),
                   "total_tokens": usage.get("input_tokens", 0) + usage.get("output_tokens", 0)},
     }
+
+
+def _sse_data(resp: Any) -> Iterator[str]:
+    """The `data:` payloads of a Server-Sent Events response, until [DONE]."""
+    for raw in resp:
+        line = raw.decode("utf-8", "replace").strip()
+        if line.startswith("data:"):
+            data = line[5:].strip()
+            if data == "[DONE]":
+                return
+            yield data
+
+
+class _Chunks:
+    """Builds OpenAI chat.completion.chunk objects for one streamed reply."""
+
+    def __init__(self, model: str):
+        self.id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
+        self.created = int(time.time())
+        self.model = model
+
+    def __call__(self, delta: dict[str, Any], finish: str | None = None) -> dict[str, Any]:
+        return {"id": self.id, "object": "chat.completion.chunk", "created": self.created, "model": self.model,
+                "choices": [{"index": 0, "delta": delta, "finish_reason": finish}]}
+
+
+def _openai_chunks(resp: Any, model: str) -> Iterator[dict[str, Any]]:
+    for data in _sse_data(resp):
+        chunk = json.loads(data)
+        if chunk.get("error"):
+            raise ValueError(chunk["error"].get("message", "upstream error"))
+        chunk["model"] = model
+        yield chunk
+
+
+def _anthropic_chunks(resp: Any, model: str) -> Iterator[dict[str, Any]]:
+    """Anthropic Messages stream events -> OpenAI chat.completion.chunk objects."""
+    chunk = _Chunks(model)
+    yield chunk({"role": "assistant", "content": ""})
+    for data in _sse_data(resp):
+        event = json.loads(data)
+        kind = event.get("type")
+        if kind == "content_block_delta" and event["delta"].get("type") == "text_delta":
+            yield chunk({"content": event["delta"]["text"]})
+        elif kind == "message_delta":
+            yield chunk({}, ANTHROPIC_STOP.get(event.get("delta", {}).get("stop_reason"), "stop"))
+        elif kind == "error":
+            raise ValueError(event.get("error", {}).get("message", "upstream error"))
+        elif kind == "message_stop":
+            return
+
+
+def _event(payload: dict[str, Any]) -> bytes:
+    return f"data: {json.dumps(payload)}\n\n".encode()
+
+
+def _sse(chunks: Iterator[dict[str, Any]], tail: dict[str, Any], resp: Any = None) -> Iterator[bytes]:
+    """Stream chunks as SSE, then a final chunk carrying `tail` (the routing info), then [DONE].
+    Once bytes are out there is no falling back, so a mid-stream failure becomes an error event."""
+    try:
+        for chunk in chunks:
+            yield _event(chunk)
+        yield _event({"object": "chat.completion.chunk", "choices": [], **tail})
+    except (OSError, ValueError) as exc:
+        yield _event({"error": {"message": f"stream interrupted: {exc}"}, **tail})
+    finally:
+        if resp is not None:
+            resp.close()
+    yield b"data: [DONE]\n\n"
 
 
 class App:
@@ -154,17 +227,39 @@ class App:
         out_headers = {f"x-solo-router-{stage}": route.model for stage, route in task.stages}
         return 200, task.to_dict(), out_headers
 
-    def _complete(self, spec: Any, body: dict[str, Any], key: str | None) -> dict[str, Any]:
-        upstream = {k: v for k, v in body.items() if k not in ("robot", "stream")}
+    @staticmethod
+    def _upstream(spec: Any, body: dict[str, Any], key: str | None,
+                  stream: bool) -> tuple[str, dict[str, Any], dict[str, str]]:
+        """URL, body and headers for one call to the model's own API."""
+        upstream = {k: v for k, v in body.items() if k not in ("robot", "stream", "stream_options")}
         base = spec.base_url.rstrip("/")
         if spec.api_format == "anthropic":
-            resp = _post(base + "/messages", _to_anthropic(upstream, spec.upstream_id),
-                         {"x-api-key": key or "", "anthropic-version": ANTHROPIC_VERSION}, self.timeout)
-            return _from_anthropic(resp)
-        upstream["model"] = spec.upstream_id
-        return _post(base + "/chat/completions", upstream, _bearer(key), self.timeout)
+            payload = _to_anthropic(upstream, spec.upstream_id)
+            headers = {"x-api-key": key or "", "anthropic-version": ANTHROPIC_VERSION}
+            url = base + "/messages"
+        else:
+            payload, headers, url = {**upstream, "model": spec.upstream_id}, _bearer(key), base + "/chat/completions"
+            if stream and "stream_options" in body:
+                payload["stream_options"] = body["stream_options"]
+        if stream:
+            payload["stream"] = True
+        return url, payload, headers
 
-    def chat(self, body: dict[str, Any], headers: dict[str, str]) -> tuple[int, dict[str, Any], dict[str, str]]:
+    def _complete(self, spec: Any, body: dict[str, Any], key: str | None) -> dict[str, Any]:
+        url, payload, headers = self._upstream(spec, body, key, stream=False)
+        resp = _post(url, payload, headers, self.timeout)
+        return _from_anthropic(resp) if spec.api_format == "anthropic" else resp
+
+    def _open_stream(self, spec: Any, body: dict[str, Any], key: str | None) -> Any:
+        url, payload, headers = self._upstream(spec, body, key, stream=True)
+        req = urllib.request.Request(url, data=json.dumps(payload).encode(), method="POST",
+                                     headers={"content-type": "application/json", "accept": "text/event-stream",
+                                              **headers})
+        return urllib.request.urlopen(req, timeout=self.timeout)
+
+    def chat(self, body: dict[str, Any], headers: dict[str, str]) -> tuple[int, Any, dict[str, str]]:
+        """OpenAI chat completions. With `"stream": true` the payload is an iterator of SSE bytes."""
+        stream = bool(body.get("stream"))
         keys = self._keys(headers)
         req = self._request(RobotRequest.from_openai(body), keys)
         result = self.router.route(req)
@@ -177,16 +272,23 @@ class App:
         if not self.dry_run and chain and result.signals["safety"] != "critical":
             errors = []
             for spec in chain:
+                key = self._key_for(spec, keys)
                 try:
-                    resp = self._complete(spec, body, self._key_for(spec, keys))
+                    # Falling back is only possible until the first byte reaches the client, so a
+                    # stream counts as served once the upstream accepts the request.
+                    resp = self._open_stream(spec, body, key) if stream else self._complete(spec, body, key)
                 except (urllib.error.URLError, TimeoutError, ValueError) as exc:
                     detail = exc.read().decode(errors="replace")[:300] if isinstance(exc, urllib.error.HTTPError) else ""
                     errors.append({"model": spec.name, "error": f"{exc} {detail}".strip()})
                     continue
-                resp["model"] = spec.name
-                resp["solo_router"] = {**result.to_dict(), "served_by": spec.name, "attempts": errors}
-                return 200, resp, {**out_headers, "x-solo-router-model": spec.name,
-                                   "x-solo-router-location": spec.location}
+                served = {**out_headers, "x-solo-router-model": spec.name, "x-solo-router-location": spec.location}
+                tail = {"model": spec.name, "solo_router": {**result.to_dict(), "served_by": spec.name,
+                                                            "attempts": errors}}
+                if stream:
+                    adapt = _anthropic_chunks if spec.api_format == "anthropic" else _openai_chunks
+                    return 200, _sse(adapt(resp, spec.name), tail, resp), served
+                resp.update(tail)
+                return 200, resp, served
             return 502, {"error": {"message": "every backend in the fallback chain failed",
                                    "attempts": errors, "fallbacks": result.fallbacks}}, out_headers
 
@@ -194,6 +296,10 @@ class App:
                    f"~{result.est_latency_ms:g}ms)")
         if result.guardrails:
             summary += f" guardrails={json.dumps(result.guardrails)}"
+        if stream:
+            chunk = _Chunks(result.model)
+            chunks = iter([chunk({"role": "assistant", "content": summary}), chunk({}, "stop")])
+            return 200, _sse(chunks, {"model": result.model, "solo_router": result.to_dict()}), out_headers
         return 200, {
             "id": f"chatcmpl-{uuid.uuid4().hex[:24]}",
             "object": "chat.completion",
@@ -235,10 +341,31 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
             self.send_header("content-type", "application/json")
             self.send_header("content-length", str(len(data)))
             self.send_header("access-control-allow-origin", "*")
+            if headers:
+                self.send_header("access-control-expose-headers", ", ".join(headers))
             for k, v in (headers or {}).items():
                 self.send_header(k, v)
             self.end_headers()
             self.wfile.write(data)
+
+        def _stream(self, status: int, events: Iterator[bytes], headers: dict[str, str]) -> None:
+            # HTTP/1.0 with no content-length: the stream ends when the connection closes.
+            self.send_response(status)
+            self.send_header("content-type", "text/event-stream")
+            self.send_header("cache-control", "no-cache")
+            self.send_header("access-control-allow-origin", "*")
+            self.send_header("access-control-expose-headers", ", ".join(headers))
+            for k, v in headers.items():
+                self.send_header(k, v)
+            self.end_headers()
+            try:
+                for event in events:
+                    self.wfile.write(event)
+                    self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                pass  # client went away
+            finally:
+                events.close()  # type: ignore[attr-defined]
 
         def do_OPTIONS(self) -> None:  # noqa: N802
             self.send_response(204)
@@ -272,7 +399,11 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
             except json.JSONDecodeError as exc:
                 self._send(400, {"error": {"message": f"invalid JSON: {exc}"}})
                 return
-            self._send(*handler(body, {k.lower(): v for k, v in self.headers.items()}))
+            status, payload, headers = handler(body, {k.lower(): v for k, v in self.headers.items()})
+            if isinstance(payload, dict):
+                self._send(status, payload, headers)
+            else:
+                self._stream(status, payload, headers)
 
         def log_message(self, fmt: str, *args: Any) -> None:
             if os.environ.get("SOLO_ROUTER_QUIET") != "1":

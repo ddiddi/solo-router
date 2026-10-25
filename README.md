@@ -167,7 +167,7 @@ solo-router serve            # dry-run server on :8899
 solo-router serve --proxy    # forward to the configured backends with your keys
 ```
 
-`run` and `route`/`task` take the same robot flags (`-e`, `-o`, `--hz`, `--network`, `--humans`, `--prefer`, `--providers`). `run` routes among hosted providers by default; add `--local` to include self-hosted onboard and edge endpoints.
+`run` and `route`/`task` take the same robot flags (`-e`, `-o`, `--hz`, `--network`, `--humans`, `--prefer`, `--providers`). `run` streams the answer as it arrives and routes among hosted providers by default; add `--local` to include self-hosted onboard and edge endpoints.
 
 Python 3.10+, with PyYAML as the only dependency. The server uses only the standard library, so it runs on the robot.
 
@@ -277,11 +277,20 @@ Every response includes a `solo_router` object (or `route` for `/v1/actions`) wi
 
 In dry-run mode (the default) chat returns a summary of the decision instead of calling a model. With `--proxy`, chat goes to the selected model (OpenAI-compatible or Anthropic Messages, translated both ways) and actions go to VLA/nav policy servers. Requests may set `robot.providers` to narrow the providers; in proxy mode the router only routes to providers it holds a key for.
 
-Like OpenRouter, a failed backend falls through to the next model in the chain. The response says which model answered (`x-solo-router-model`, `solo_router.served_by`) and lists failed `attempts`. If every backend fails you get `502` with all attempts; unreachable policies return a `hold` action. Streaming is not supported yet; `stream` is ignored.
+Set `"stream": true` for Server-Sent Events in OpenAI's `chat.completion.chunk` format, from any provider. Anthropic's stream is translated, and OpenAI-compatible streams pass through. The routing headers arrive before the first token, and the last chunk before `data: [DONE]` carries the `solo_router` object. In dry-run mode the decision summary streams as one chunk.
+
+```bash
+curl -N localhost:8899/v1/chat/completions -H "x-anthropic-api-key: $ANTHROPIC_API_KEY" -d '{
+  "model": "solo/auto", "stream": true,
+  "messages": [{"role": "user", "content": "plan how to clear the table, then wipe it"}]}'
+# data: {"object": "chat.completion.chunk", "model": "anthropic/claude-sonnet-5-5", "choices": [{"delta": {"content": "1. "}, ...}]}
+```
+
+Like OpenRouter, a failed backend falls through to the next model in the chain. The response says which model answered (`x-solo-router-model`, `solo_router.served_by`) and lists failed `attempts`. A stream can fall back until its first byte is sent; after that, a failure arrives as an `error` event. If every backend fails you get `502` with all attempts; unreachable policies return a `hold` action.
 
 ## Website
 
-[`website/`](website/) is a static site deployed to GitHub Pages. Its playground runs [`website/assets/router.js`](website/assets/router.js), a browser port of the router, on [`router-config.json`](website/assets/router-config.json). Type a prompt and press **Run**: the router picks a model, and with a key in the *API keys* panel, [`providers.js`](website/assets/providers.js) calls OpenAI, Anthropic or Nebius Token Factory straight from your browser. If a provider blocks browser (CORS) requests, the answer box says so; use `solo-router run` instead. Robot-side picks (VLAs, edge models) are re-routed to the hosted models a browser can reach, the same way `solo-router run` does. After changing the YAML, regenerate it:
+[`website/`](website/) is a static site deployed to GitHub Pages. Its playground runs [`website/assets/router.js`](website/assets/router.js), a browser port of the router, on [`router-config.json`](website/assets/router-config.json). Type a prompt and press **Run**: the router picks a model, and with a key in the *API keys* panel, [`providers.js`](website/assets/providers.js) calls OpenAI, Anthropic or Nebius Token Factory straight from your browser. The answer streams in token by token. If a provider blocks browser (CORS) requests, the answer box says so; use `solo-router run` instead. Robot-side picks (VLAs, edge models) are re-routed to the hosted models a browser can reach, the same way `solo-router run` does. After changing the YAML, regenerate it:
 
 ```bash
 solo-router export > website/assets/router-config.json
