@@ -169,7 +169,15 @@ async function run() {
   const label = router.config.providers[spec.provider].label;
   if (!key) {
     openKeys(true);
-    return answer(`The router picked <b>${esc(r.model)}</b>. Add your ${esc(label)} key to run it, or any other key to route to that provider instead.`);
+    // Name what each other provider's key would get you, best-ranked model first.
+    const alts = [];
+    for (const c of r.ranked) {
+      const p = router.models[c.model].provider;
+      if (p && p !== spec.provider && !alts.some((a) => a.p === p)) alts.push({ p, model: c.model });
+    }
+    const others = alts.map((a) => `${esc(router.config.providers[a.p].label)} → <b>${esc(a.model)}</b>`).join(", ");
+    return answer(`The router picked <b>${esc(r.model)}</b> on ${esc(label)}. Add your ${esc(label)} key to run it.` +
+      (others ? ` Or add another provider's key and the router will use that one instead: ${others}.` : ""));
   }
   const btn = $("#run");
   btn.disabled = true;
@@ -268,7 +276,7 @@ const ROLE_INFO = {
 function renderRoles(cfg) {
   const card = (m) => `
     <div class="model-card">
-      <div class="model-top"><b>${esc(m.name)}</b><span class="badge ${m.location}">${m.location === "browser" ? "browser · " + esc((m.runtimes || []).join("/")) : m.provider ? "cloud · " + esc(cfg.providers[m.provider].label) : m.location}</span></div>
+      <div class="model-top"><b>${esc(m.name)}</b><span class="badge ${m.location}">${m.location === "browser" ? (m.runtimes?.length ? "browser · " + esc(m.runtimes.join("/")) : "browser") : m.provider ? "cloud · " + esc(cfg.providers[m.provider].label) : m.location}</span></div>
       <p>${esc(m.description || "")}</p>
       <div class="model-meta"><span>${esc(m.kind)}</span><span>~${m.p50_latency_ms} ms</span>${m.action_chunk > 1 ? `<span>chunk ${m.action_chunk}</span>` : ""}${m.onnx ? `<span class="onnx">ONNX</span>` : ""}</div>
     </div>`;

@@ -31,6 +31,13 @@ A robot does not run one model. A fold needs a VLA at 30 Hz, a hallway needs a n
 
 Solo Router sits between your robot stack and those models. For every instruction it extracts **signals**, matches a **decision**, filters candidates against hard limits, and scores the survivors with an **algorithm**. The result is a model, a location (onboard, edge or cloud), a fallback chain that always ends in a fail-safe, and a trace explaining every step.
 
+Use Solo Router when you need to:
+
+- Call robot policies and hosted models (OpenAI, Claude, Nebius Token Factory) through one OpenAI-compatible endpoint.
+- Switch models or providers in one YAML file, without changing robot code.
+- Route around provider outages, dropped Wi-Fi and missed deadlines with automatic fallbacks that end in a fail-safe.
+- Bring your own keys: no account and no markup, since you pay each provider directly.
+
 It applies the signal → decision → algorithm architecture of [vLLM Semantic Router](https://github.com/vllm-project/semantic-router) to robotics.
 
 | Dimension | Fragmented today | With Solo Router |

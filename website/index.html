@@ -45,6 +45,7 @@
     <nav class="nav-links" aria-label="Main">
       <a href="#demo">Demo</a>
       <a href="#models">Models</a>
+      <a href="#providers">Providers</a>
       <a href="#playground">Playground</a>
       <a href="#architecture">Architecture</a>
       <a href="#safety">Safety</a>
@@ -64,6 +65,7 @@
   </button>
   <a href="#demo">Demo</a>
   <a href="#models">Models</a>
+  <a href="#providers">Providers</a>
   <a href="#playground">Playground</a>
   <a href="#architecture">Architecture</a>
   <a href="#safety">Safety</a>
@@ -193,6 +195,43 @@
           <a class="btn btn-ghost" href="https://github.com/ddiddi/solo-router#quick-start">Installation guide</a>
           <a class="btn btn-ghost" href="https://github.com/ddiddi/solo-router#readme">Read the docs</a>
         </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PROVIDERS -->
+  <section id="providers">
+    <div class="container">
+      <div class="section-head reveal">
+        <div class="kicker">Providers</div>
+        <h2>One endpoint. Every model your robot needs.</h2>
+        <p>A unified, OpenAI-compatible API for robot policies and hosted models, with routing, fallbacks and a safety envelope across onboard, edge and cloud. Bring your own OpenAI, Claude or Nebius Token Factory key.</p>
+      </div>
+      <div class="cards cards-4">
+        <div class="card reveal">
+          <div class="num">01 · one key</div>
+          <h3>Any one key is enough</h3>
+          <p>Add a key and the router uses that provider for cloud work, and the robot's own models for everything else. No key: it stays self-hosted.</p>
+        </div>
+        <div class="card reveal">
+          <div class="num">02 · no code changes</div>
+          <h3>Switch models in config</h3>
+          <p>Models are <code>provider/model</code> IDs in one YAML file. Change the pool or the provider, not the robot.</p>
+        </div>
+        <div class="card reveal">
+          <div class="num">03 · fallbacks</div>
+          <h3>Route around outages</h3>
+          <p>If a provider fails or rate-limits, the request falls through to the next model. Every chain ends at the safety controller.</p>
+        </div>
+        <div class="card reveal">
+          <div class="num">04 · your keys</div>
+          <h3>No account, no markup</h3>
+          <p>Keys live in your env, a per-request header, or this browser. You pay each provider directly at its own price.</p>
+        </div>
+      </div>
+      <div class="ctas" style="justify-content:center;margin-top:28px">
+        <a class="btn btn-primary" href="#playground" style="color:var(--base)">Run a prompt →</a>
+        <a class="btn btn-ghost" href="https://github.com/ddiddi/solo-router#providers-and-api-keys">Providers &amp; keys docs</a>
       </div>
     </div>
   </section>
