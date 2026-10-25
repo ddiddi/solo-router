@@ -185,7 +185,7 @@ section { padding: 96px 0; }
 .terminal .k { color: var(--lavender); }
 .terminal .s { color: #9fe0c2; }
 .install-note { margin-top: 14px; font-size: 14px; color: var(--text-3); text-align: center; }
-.install .ctas { display: flex; justify-content: center; gap: 12px; margin-top: 28px; flex-wrap: wrap; }
+.install .ctas, .providers-ctas { display: flex; justify-content: center; gap: 12px; margin-top: 28px; flex-wrap: wrap; }
 
 /* ---------- playground ---------- */
 .pg { display: grid; gap: 16px; grid-template-columns: 1fr; }
