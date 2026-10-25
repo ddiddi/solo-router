@@ -252,6 +252,10 @@ class App:
             url = base + "/messages"
         else:
             payload, headers, url = {**upstream, "model": spec.upstream_id}, _bearer(key), base + "/chat/completions"
+            # OpenAI's current models reject max_tokens; self-hosted OpenAI-compatible servers often
+            # only know max_tokens, so rename it for OpenAI alone.
+            if spec.provider == "openai" and "max_tokens" in payload:
+                payload.setdefault("max_completion_tokens", payload.pop("max_tokens"))
             if stream and "stream_options" in body:
                 payload["stream_options"] = body["stream_options"]
         if stream:

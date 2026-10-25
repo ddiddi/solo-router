@@ -1,6 +1,7 @@
 // Bring your own key: the hosted providers in router-config.json (OpenAI, Anthropic,
 // Nebius Token Factory). Keys stay in this browser and go straight to the provider;
-// nothing passes through a Solo Router server.
+// nothing passes through a Solo Router server. Visitors without a key can get a free
+// run from the free-tier Worker (free-tier/worker.js), which holds its keys as secrets.
 
 const STORE = "solo-router-keys";
 
@@ -91,19 +92,56 @@ export async function complete(config, spec, messages, key, maxTokens = 512, onT
     const data = await res.json().catch(() => ({}));
     throw new Error(`${p.label} ${res.status}: ${data.error?.message || res.statusText}`);
   }
-  if (stream) {
-    let text = "";
-    for await (const ev of sseData(res)) {
-      if (ev.error || ev.type === "error") throw new Error(`${p.label}: ${ev.error?.message || "stream error"}`);
-      const piece = p.api_format === "anthropic"
-        ? (ev.type === "content_block_delta" && ev.delta?.type === "text_delta" ? ev.delta.text : "")
-        : ev.choices?.[0]?.delta?.content || "";
-      if (piece) { text += piece; onToken(piece); }
-    }
-    return text;
-  }
+  if (stream) return readStream(res, p.api_format, p.label, onToken);
   const data = await res.json().catch(() => ({}));
   return p.api_format === "anthropic"
     ? (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("")
     : data.choices?.[0]?.message?.content ?? "";
+}
+
+// Accumulate a streamed reply in either provider format, passing each piece to onToken.
+async function readStream(res, format, label, onToken) {
+  let text = "";
+  for await (const ev of sseData(res)) {
+    if (ev.error || ev.type === "error") throw new Error(`${label}: ${ev.error?.message || "stream error"}`);
+    const piece = format === "anthropic"
+      ? (ev.type === "content_block_delta" && ev.delta?.type === "text_delta" ? ev.delta.text : "")
+      : ev.choices?.[0]?.delta?.content || "";
+    if (piece) { text += piece; onToken(piece); }
+  }
+  return text;
+}
+
+// ---------- free runs ----------
+// The Worker's URL comes from <meta name="solo-free-tier">; empty turns free runs off.
+const freeUrl = () => (globalThis.document?.querySelector('meta[name="solo-free-tier"]')?.content || "").replace(/\/$/, "");
+
+/** { providers, remaining } from the free-tier Worker, or null when it is off or unreachable. */
+export async function freeStatus() {
+  const url = freeUrl();
+  if (!url) return null;
+  try {
+    const res = await fetch(`${url}/status`);
+    return res.ok ? await res.json() : null;
+  } catch { return null; }
+}
+
+/** Run one model through the free tier. Returns { text, remaining }. */
+export async function freeRun(config, spec, messages, onToken) {
+  const label = config.providers[spec.provider].label;
+  let res;
+  try {
+    res = await fetch(`${freeUrl()}/run`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: spec.name, messages }),
+    });
+  } catch {
+    throw new Error("The free tier is unreachable right now. Add your own API key to keep going.");
+  }
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error?.message || `free tier ${res.status}`);
+  }
+  const text = await readStream(res, res.headers.get("x-solo-format"), label, onToken);
+  return { text, remaining: Number(res.headers.get("x-solo-remaining") || 0) };
 }

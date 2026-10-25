@@ -460,3 +460,5 @@ footer { border-top: 1px solid var(--border); padding: 64px 0 40px; }
 .answer-head { display: block; font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--lavender); margin-bottom: 6px; white-space: normal; }
 .answer-wait { color: var(--text-3); }
 .badge.provider { color: var(--lavender); border-color: rgba(173,148,249,.35); }
+.free-hint { font-size: 12px; font-family: var(--font-mono); color: var(--success); border: 1px solid rgba(52,211,153,.35); border-radius: 999px; padding: 4px 10px; }
+.answer-foot { display: block; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); font-size: 13px; color: var(--text-2); white-space: normal; }

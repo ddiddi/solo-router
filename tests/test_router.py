@@ -460,3 +460,12 @@ def test_stream_error_midway_becomes_error_event():
 
     events = [e.decode() for e in _sse(broken(), {"model": "m"})]
     assert "stream interrupted: connection reset" in events[-2] and events[-1] == "data: [DONE]\n\n"
+
+
+def test_openai_gets_max_completion_tokens(router):
+    app = App(router, dry_run=True)
+    body = {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 50, "robot": {}}
+    _, payload, _ = app._upstream(router.config.models["openai/gpt-5.5"], body, "k", stream=True)
+    assert payload["max_completion_tokens"] == 50 and "max_tokens" not in payload and payload["stream"] is True
+    _, payload, _ = app._upstream(router.config.models["nebius/gpt-oss-120b"], body, "k", stream=False)
+    assert payload["max_tokens"] == 50 and "robot" not in payload

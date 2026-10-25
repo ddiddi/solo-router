@@ -1,0 +1,17 @@
+# Free runs for the website. Keys are Worker secrets, never files:
+#   npx wrangler secret put NEBIUS_API_KEY      (and/or OPENAI_API_KEY, ANTHROPIC_API_KEY)
+# See README.md#free-runs-on-the-website.
+name = "solo-router-free"
+main = "worker.js"
+compatibility_date = "2025-09-01"
+
+[vars]
+ALLOWED_ORIGINS = "https://ddiddi.github.io,http://localhost:8765"
+RUNS_PER_DAY = "1"      # per visitor
+DAILY_CAP = "200"       # all visitors together
+MAX_TOKENS = "600"      # per reply
+
+# Create with: npx wrangler kv namespace create RUNS   and paste the id here.
+[[kv_namespaces]]
+binding = "RUNS"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"

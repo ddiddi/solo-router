@@ -1,5 +1,5 @@
 import { Router } from "./router.js";
-import { complete, enabledProviders, loadKeys, saveKeys } from "./providers.js";
+import { complete, enabledProviders, freeRun, freeStatus, loadKeys, saveKeys } from "./providers.js";
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
@@ -57,7 +57,9 @@ const PRESETS = [
 ];
 
 let router;
-const state = { network: "online", ...loadKeys() };
+// free: { providers, remaining } from the free-tier Worker, or null when there is none.
+const state = { network: "online", free: null, ...loadKeys() };
+const freeLeft = () => !Object.keys(state.keys).length && state.free?.remaining > 0 && state.free.providers.length > 0;
 
 function pressed(el, v) { el.setAttribute("aria-pressed", String(v)); }
 function isPressed(el) { return el.getAttribute("aria-pressed") === "true"; }
@@ -74,7 +76,8 @@ function readRequest() {
     humans_nearby: isPressed($("#humans")),
     estop: isPressed($("#estop")),
     preference: $("#preference").value,
-    providers: enabledProviders(state.keys),
+    // Your keys decide the providers; without any, the free tier's providers (if a run is left).
+    providers: enabledProviders(state.keys) ?? (freeLeft() ? state.free.providers : null),
   };
 }
 
@@ -168,8 +171,9 @@ async function run() {
   }
   const spec = router.models[r.model];
   const key = state.keys[spec.provider];
+  const free = !key && freeLeft();
   const label = router.config.providers[spec.provider].label;
-  if (!key) {
+  if (!key && !free) {
     openKeys(true);
     // Name what each other provider's key would get you, best-ranked model first.
     const alts = [];
@@ -178,7 +182,8 @@ async function run() {
       if (p && p !== spec.provider && !alts.some((a) => a.p === p)) alts.push({ p, model: c.model });
     }
     const others = alts.map((a) => `${esc(router.config.providers[a.p].label)} → <b>${esc(a.model)}</b>`).join(", ");
-    return answer(`The router picked <b>${esc(r.model)}</b> on ${esc(label)}. Add your ${esc(label)} key to run it.` +
+    const used = state.free && !Object.keys(state.keys).length ? "You've used today's free run. " : "";
+    return answer(`${used}The router picked <b>${esc(r.model)}</b> on ${esc(label)}. Add your ${esc(label)} key to run it.` +
       (others ? ` Or add another provider's key and the router will use that one instead: ${others}.` : ""));
   }
   const btn = $("#run");
@@ -190,26 +195,42 @@ async function run() {
       { role: "system", content: "You are the reasoning model behind a robot router. Answer briefly. For tasks, reply with a short numbered plan of robot skills." },
       { role: "user", content: $("#instruction").value },
     ];
-    const head = (status) => `<span class="answer-head">${esc(r.model)} · ${esc(label)} · ${status}${esc(note)}</span>`;
+    const head = (status) => `<span class="answer-head">${esc(r.model)} · ${esc(label)}${free ? " · free run" : ""} · ${status}${esc(note)}</span>`;
     let first = 0;
     let streamed = "";
     const id = runId;
-    const text = await complete(router.config, spec, messages, key, 512, (piece) => {
+    const onToken = (piece) => {
       if (id !== runId) return;
       first ||= performance.now();
       streamed += piece;
       // Re-render from the accumulated text so markup in the reply stays escaped.
       answer(head("streaming…") + esc(streamed.trimStart()));
-    });
+    };
+    let text;
+    if (free) {
+      ({ text, remaining: state.free.remaining } = await freeRun(router.config, spec, messages, onToken));
+      updateFreeHint();
+    } else {
+      text = await complete(router.config, spec, messages, key, 512, onToken);
+    }
     if (id !== runId) return;
     const secs = (ms) => (ms / 1000).toFixed(1);
     const done = performance.now();
-    answer(head(`${secs(done - t0)}s${first ? ` · first token ${secs(first - t0)}s` : ""}`) + esc(text.trim() || "(empty reply)"));
+    const foot = free && !freeLeft()
+      ? `<span class="answer-foot">That was your free run for today. Add your own key under <b>API keys</b> to keep going.</span>` : "";
+    answer(head(`${secs(done - t0)}s${first ? ` · first token ${secs(first - t0)}s` : ""}`) + esc(text.trim() || "(empty reply)") + foot);
   } catch (e) {
+    if (free) { state.free.remaining = 0; updateFreeHint(); openKeys(true); }
     answer(esc(e.message), "error");
   } finally {
     btn.disabled = false;
   }
+}
+
+function updateFreeHint() {
+  const el = $("#free-hint");
+  el.hidden = !freeLeft();
+  if (state.free) el.textContent = `${state.free.remaining} free run${state.free.remaining === 1 ? "" : "s"} today · no key needed`;
 }
 
 function openKeys(open) {
@@ -233,6 +254,7 @@ function renderKeys(cfg) {
     state.keys = saveKeys(keys, state.remember);
     const n = Object.keys(state.keys).length;
     $("#keys-count").textContent = n ? `· ${n} set` : "";
+    updateFreeHint();
     render();
   };
   $$("#keys-fields input").forEach((i) => i.addEventListener("input", sync));
@@ -272,6 +294,7 @@ fetch("assets/router-config.json")
   .then((cfg) => {
     router = new Router(cfg);
     renderKeys(cfg);
+    freeStatus().then((free) => { state.free = free; updateFreeHint(); render(); });
     const set = (k, v) => { const el = document.querySelector(`[data-stat="${k}"]`); if (el) el.textContent = v; };
     set("decisions", cfg.decisions.length);
     set("models", cfg.models.length);

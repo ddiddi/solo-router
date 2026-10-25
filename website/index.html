@@ -22,6 +22,8 @@
   }
   </script>
   <link rel="stylesheet" href="assets/style.css">
+  <!-- Free-tier Worker URL (free-tier/worker.js). Empty: no free runs, bring your own key. -->
+  <meta name="solo-free-tier" content="">
 </head>
 <body>
 
@@ -253,10 +255,11 @@
             <div class="run-row">
               <button type="button" class="btn btn-primary" id="run">Run ▶</button>
               <button type="button" class="keys-toggle" id="keys-toggle" aria-expanded="false" aria-controls="keys">API keys <span id="keys-count"></span></button>
+              <span class="free-hint" id="free-hint" hidden></span>
               <span class="run-hint">⌘/Ctrl + Enter</span>
             </div>
             <div class="keys" id="keys" hidden>
-              <p class="keys-note">Optional. Add any one key; the router only picks providers you have a key for. Stored in this browser only.</p>
+              <p class="keys-note">Optional if you still have a free run. Add any one key; the router only picks providers you have a key for. Stored in this browser only.</p>
               <div id="keys-fields"></div>
               <label class="keys-remember"><input type="checkbox" id="keys-remember"> Remember on this device</label>
             </div>

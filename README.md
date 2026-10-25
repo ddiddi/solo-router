@@ -92,7 +92,26 @@ Where keys come from:
 
 - **Environment**: the `api_key_env` of each provider (above).
 - **Per request**: an `x-openai-api-key`, `x-anthropic-api-key` or `x-nebius-api-key` header on any `/v1/*` call, so one router can serve several users with their own keys.
-- **Website**: the playground's *API keys* panel. Keys stay in your browser (session storage, or local storage if you tick *Remember*) and go straight to the provider. Nothing passes through a Solo Router server.
+- **Website**: one free run without a key (see below), then the playground's *API keys* panel. Keys stay in your browser (session storage, or local storage if you tick *Remember*) and go straight to the provider. Nothing passes through a Solo Router server.
+
+### Free runs on the website
+
+Visitors without a key can get one free run a day. Keys can't be hidden in a static site (anything shipped to the browser is public), so the free run goes through a small Cloudflare Worker, [`free-tier/worker.js`](free-tier/worker.js), that holds the keys as secrets:
+
+- one run per visitor per day (`RUNS_PER_DAY`), counted by a salted hash of the address, never the raw IP
+- a cap across all visitors (`DAILY_CAP`) so a bot can't drain your credits
+- only the hosted models in `router-config.json`, at most `MAX_TOKENS` per reply and 4,000 characters in
+- only requests from the site's origin (`ALLOWED_ORIGINS`)
+
+```bash
+cd free-tier
+npx wrangler login
+npx wrangler kv namespace create RUNS        # paste the id into wrangler.toml
+npx wrangler secret put NEBIUS_API_KEY       # and/or OPENAI_API_KEY, ANTHROPIC_API_KEY
+npx wrangler deploy                          # prints https://solo-router-free.<you>.workers.dev
+```
+
+Then put that URL in `website/index.html`: `<meta name="solo-free-tier" content="https://solo-router-free.<you>.workers.dev">`. With the tag empty, the site has no free runs and asks for a key. Use dedicated keys with a spend limit for this.
 
 Add a provider or a model in `router.yaml`. Models inherit `base_url`, `api_format` and `api_key_env` from their provider; `upstream_model` sets the provider's ID when it differs from the name:
 
