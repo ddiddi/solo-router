@@ -96,6 +96,19 @@ def _from_anthropic(resp: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _describe(exc: Exception) -> str:
+    """One line for a failed upstream call, using the provider's own error message when it sent one."""
+    if isinstance(exc, urllib.error.HTTPError):
+        raw = exc.read().decode(errors="replace")
+        try:
+            err = json.loads(raw).get("error")
+            message = err.get("message") if isinstance(err, dict) else err
+        except (ValueError, AttributeError):
+            message = None
+        return f"HTTP {exc.code}: {message or raw.strip()[:300] or exc.reason}"
+    return str(exc)
+
+
 def _sse_data(resp: Any) -> Iterator[str]:
     """The `data:` payloads of a Server-Sent Events response, until [DONE]."""
     for raw in resp:
@@ -278,8 +291,7 @@ class App:
                     # stream counts as served once the upstream accepts the request.
                     resp = self._open_stream(spec, body, key) if stream else self._complete(spec, body, key)
                 except (urllib.error.URLError, TimeoutError, ValueError) as exc:
-                    detail = exc.read().decode(errors="replace")[:300] if isinstance(exc, urllib.error.HTTPError) else ""
-                    errors.append({"model": spec.name, "error": f"{exc} {detail}".strip()})
+                    errors.append({"model": spec.name, "error": _describe(exc)})
                     continue
                 served = {**out_headers, "x-solo-router-model": spec.name, "x-solo-router-location": spec.location}
                 tail = {"model": spec.name, "solo_router": {**result.to_dict(), "served_by": spec.name,

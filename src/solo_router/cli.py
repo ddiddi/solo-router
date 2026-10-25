@@ -12,6 +12,11 @@ from .router import RouteResult, Router
 from .signals import RobotRequest
 
 
+# Same instruction the website playground sends, so both give robot-style answers.
+RUN_SYSTEM_PROMPT = ("You are the reasoning model behind a robot router. Answer briefly. "
+                     "For tasks, reply with a short numbered plan of robot skills.")
+
+
 def _router(path: str | None) -> Router:
     return Router(load_config(path or default_config_path()))
 
@@ -123,7 +128,8 @@ def _run(router: Router, args: argparse.Namespace) -> int:
     robot = {k: v for k, v in vars(req).items() if k not in ("instruction", "model", "overrides")}
     if not args.local:
         robot["locations"] = ["cloud"]
-    body = {"model": "solo/auto", "robot": robot, "messages": [{"role": "user", "content": args.instruction}],
+    messages = [{"role": "system", "content": RUN_SYSTEM_PROMPT}, {"role": "user", "content": args.instruction}]
+    body = {"model": "solo/auto", "robot": robot, "messages": messages,
             "stream": not args.json}
     status, resp, headers = app.chat(body, {})
     if status == 200 and not isinstance(resp, dict):

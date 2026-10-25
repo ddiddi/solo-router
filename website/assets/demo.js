@@ -533,7 +533,8 @@ export function mountDemo(root, router) {
       } else if (skill === "lift") {
         await go(new THREE.Vector3(tip.x, 0.12, tip.z));
       } else if (skill === "release") {
-        if (p && Math.hypot(tip.x - p.x, tip.z - p.z) > 0.01) await go(new THREE.Vector3(p.x, 0.12, p.z));
+        // release(bowl) moves over the bowl first; release(red_cube) names the held cube, so let go here.
+        if (p && OBJECTS[arg] !== holding && Math.hypot(tip.x - p.x, tip.z - p.z) > 0.01) await go(new THREE.Vector3(p.x, 0.12, p.z));
         const overBowl = Math.hypot(tip.x - bowl.position.x, tip.z - bowl.position.z) < 0.04;
         await go(new THREE.Vector3(tip.x, overBowl ? 0.075 : CUBE / 2 + 0.004, tip.z));
         await grip(GRIP_OPEN, 300);
