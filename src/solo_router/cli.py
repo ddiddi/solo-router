@@ -1,9 +1,10 @@
-"""Command line: `solo-router serve | route | task | models | export`."""
+"""Command line: `solo-router run | serve | route | task | models | providers | export`."""
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 
 from .config import ROLES, default_config_path, load_config
@@ -25,12 +26,16 @@ def main(argv: list[str] | None = None) -> int:
     p_serve.add_argument("--port", type=int)
     p_serve.add_argument("--proxy", action="store_true", help="forward to backends instead of dry-run")
 
+    p_run = sub.add_parser("run", help="route one prompt and call the chosen model with your API keys")
     p_route = sub.add_parser("route", help="route one instruction and print the decision")
     p_task = sub.add_parser("task", help="route one instruction through perceive -> reason -> act")
-    for p in (p_route, p_task):
+    for p in (p_run, p_route, p_task):
         _request_args(p)
+    p_run.add_argument("--local", action="store_true",
+                       help="also route to self-hosted onboard/edge endpoints, not only hosted providers")
 
     sub.add_parser("models", help="list configured models by role")
+    sub.add_parser("providers", help="list cloud providers and whether their API key is set")
     sub.add_parser("export", help="print the config as JSON (used by the website playground)")
 
     args = parser.parse_args(argv)
@@ -42,6 +47,8 @@ def main(argv: list[str] | None = None) -> int:
         listener = router.config.listener
         serve(router, args.host or listener.get("address", "0.0.0.0"), args.port or listener.get("port", 8899),
               dry_run=False if args.proxy else None)
+    elif args.cmd == "run":
+        return _run(router, args)
     elif args.cmd == "route":
         result = router.route(_request(args))
         if args.json:
@@ -64,7 +71,14 @@ def main(argv: list[str] | None = None) -> int:
             for m in router.config.models.values():
                 if m.role == role:
                     chunk = f" chunk={m.action_chunk}" if m.action_chunk > 1 else ""
-                    print(f"  {m.name:<20} {m.kind:<9} {m.location:<8} {m.p50_latency_ms:>6g}ms  q={m.quality:.2f}{chunk}")
+                    print(f"  {m.name:<28} {m.kind:<10} {m.location:<8} {m.p50_latency_ms:>6g}ms  q={m.quality:.2f}{chunk}")
+    elif args.cmd == "providers":
+        for p in router.config.providers.values():
+            status = "key set" if os.environ.get(p.api_key_env) else "no key"
+            print(f"{p.name:<10} {p.label:<22} ${p.api_key_env:<18} {status}")
+            for m in router.config.models.values():
+                if m.provider == p.name:
+                    print(f"  {m.name:<28} -> {m.upstream_id}")
     elif args.cmd == "export":
         json.dump(router.config.raw, sys.stdout, indent=2)
         print()
@@ -81,6 +95,8 @@ def _request_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--battery", type=float)
     p.add_argument("--humans", action="store_true", help="humans are near the robot")
     p.add_argument("--prefer", default="balanced", choices=["balanced", "quality", "latency", "cost"])
+    p.add_argument("--providers", help="cloud providers you have keys for, e.g. openai,nebius ('' for none); "
+                                       "default: all")
     p.add_argument("--json", action="store_true")
 
 
@@ -90,7 +106,39 @@ def _request(args: argparse.Namespace) -> RobotRequest:
         observations=[o for o in args.obs.split(",") if o], control_hz=args.hz,
         latency_budget_ms=args.budget_ms, network=args.network, battery_pct=args.battery,
         humans_nearby=args.humans, preference=args.prefer,
+        providers=None if args.providers is None else [p for p in args.providers.split(",") if p],
     )
+
+
+def _run(router: Router, args: argparse.Namespace) -> int:
+    """One prompt, one command: route among the providers you have keys for, then call the model."""
+    from .server import App
+
+    app = App(router, dry_run=False)
+    if not app.keys and not args.local:
+        print("no provider key found: export OPENAI_API_KEY, ANTHROPIC_API_KEY or NEBIUS_API_KEY "
+              "(or pass --local to use self-hosted endpoints)", file=sys.stderr)
+        return 1
+    req = _request(args)
+    robot = {k: v for k, v in vars(req).items() if k not in ("instruction", "model", "overrides")}
+    if not args.local:
+        robot["locations"] = ["cloud"]
+    status, resp, _ = app.chat({"model": "solo/auto", "robot": robot,
+                                "messages": [{"role": "user", "content": args.instruction}]}, {})
+    if args.json:
+        print(json.dumps(resp, indent=2))
+        return 0 if status == 200 else 1
+    if status != 200:
+        print(f"error: {resp['error']['message']}", file=sys.stderr)
+        for attempt in resp["error"].get("attempts", []):
+            print(f"  {attempt['model']}: {attempt['error']}", file=sys.stderr)
+        return 1
+    info = resp["solo_router"]
+    served = info.get("served_by", info["model"])
+    location = router.config.models[served].location
+    print(f"[{info['decision']} -> {served} @ {location}]", file=sys.stderr)
+    print(resp["choices"][0]["message"]["content"])
+    return 0
 
 
 def _print_route(result: RouteResult, indent: str = "") -> None:

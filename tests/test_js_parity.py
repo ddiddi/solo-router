@@ -30,8 +30,11 @@ CONTEXTS = [
     {"observations": ["rgb"], "control_hz": 30, "overrides": {"intent": "perception", "horizon": "short"}},
     {"observations": ["rgb"], "control_hz": 30, "locations": ["browser"], "client_runtimes": ["webgpu", "wasm"]},
     {"observations": ["rgb"], "locations": ["browser", "edge"], "client_runtimes": []},
+    {"observations": ["rgb"], "providers": ["openai"]},
+    {"observations": [], "providers": ["nebius", "anthropic"], "network": "degraded"},
+    {"observations": ["rgb"], "providers": [], "locations": ["cloud"]},
 ]
-KEYS = ("decision", "model", "rejected", "fallbacks", "guardrails", "trace", "signals")
+KEYS = ("decision", "model", "provider", "rejected", "fallbacks", "guardrails", "trace", "signals")
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")

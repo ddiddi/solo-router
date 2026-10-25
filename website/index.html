@@ -51,7 +51,7 @@
       <a href="https://github.com/ddiddi/solo-router#readme">Docs</a>
       <a href="https://github.com/ddiddi/solo-router">GitHub</a>
       <span class="divider"></span>
-      <a class="btn btn-primary" href="#playground" style="color:var(--base)">Try the Playground</a>
+      <a class="btn btn-primary" href="#playground" style="color:var(--base)">Run a prompt</a>
     </nav>
     <button class="nav-burger" id="burger" aria-label="Open menu">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
@@ -79,9 +79,9 @@
     <div class="container">
       <div class="eyebrow"><b>signals → decisions → policies</b><span class="eyebrow-tail"> · the decision layer for physical AI</span></div>
       <h1>Every action.<br><span class="grad">The right policy.</span></h1>
-      <p class="sub">An open, programmable decision layer for robots. Solo Router sends each instruction to the best-fit VLA, planner, VLM, or safety controller — across onboard, edge, and cloud compute.</p>
+      <p class="sub">An open, programmable decision layer for robots. Solo Router sends each instruction to the best-fit VLA, planner, VLM, or safety controller — across onboard, edge, and cloud compute. Bring your own OpenAI, Claude or Nebius key and run it in one click.</p>
       <div class="ctas">
-        <a class="btn btn-primary btn-lg" href="#demo">Watch the SO-101 demo →</a>
+        <a class="btn btn-primary btn-lg" href="#playground">Run a prompt →</a>
         <button class="btn btn-ghost btn-lg btn-cmd" data-copy="pip install git+https://github.com/ddiddi/solo-router">
           <span class="prompt">$</span> pip install solo-router <span class="copied" hidden>copied</span>
         </button>
@@ -170,10 +170,11 @@
         <div class="terminal" data-panel="humans">
           <div class="terminal-bar"><i></i><i></i><i></i><span>bash</span><button class="copy" data-copy-target="cmd-humans">copy</button></div>
 <pre id="cmd-humans"><span class="p">$ </span>pip install git+https://github.com/ddiddi/solo-router
-<span class="p">$ </span>solo-router route <span class="s">"pick up the red cup"</span> <span class="k">-e</span> arm <span class="k">-o</span> rgb,proprio <span class="k">--hz</span> 20
-<span class="c">realtime_manipulation -> pi0-3b @ edge (~45ms)
-fallbacks: smolvla-450m -> safety-controller</span>
-<span class="p">$ </span>solo-router serve            <span class="c"># OpenAI-compatible on :8899</span></pre>
+<span class="p">$ </span>export ANTHROPIC_API_KEY=sk-ant-...   <span class="c"># or OPENAI_API_KEY / NEBIUS_API_KEY</span>
+<span class="p">$ </span>solo-router run <span class="s">"plan how to clear the table, then wipe it"</span>
+<span class="c">[long_horizon_task -> anthropic/claude-sonnet-5-5 @ cloud]
+1. move_above(plate) ...</span>
+<span class="p">$ </span>solo-router serve <span class="k">--proxy</span>    <span class="c"># OpenAI-compatible on :8899</span></pre>
         </div>
         <div class="terminal" data-panel="agents" hidden>
           <div class="terminal-bar"><i></i><i></i><i></i><span>http</span><button class="copy" data-copy-target="cmd-agents">copy</button></div>
@@ -201,8 +202,8 @@ fallbacks: smolvla-450m -> safety-controller</span>
     <div class="container">
       <div class="section-head reveal">
         <div class="kicker">Playground</div>
-        <h2>Watch it decide.</h2>
-        <p>The real routing engine, running in your browser on the same config the server ships with. Change the robot, the network or the deadline and see the decision move.</p>
+        <h2>One prompt. One click.</h2>
+        <p>Type an instruction and press <b>Run</b>. The real router picks a model; with your OpenAI, Claude or Nebius Token Factory key it calls that model and shows the answer. Keys stay in your browser and go straight to the provider.</p>
       </div>
       <div class="pg">
         <form class="pg-panel" id="pg-form" onsubmit="return false">
@@ -210,6 +211,16 @@ fallbacks: smolvla-450m -> safety-controller</span>
             <label for="instruction">Instruction</label>
             <textarea id="instruction" rows="3">pick up the red cup and place it on the tray</textarea>
             <div class="presets" id="presets"></div>
+            <div class="run-row">
+              <button type="button" class="btn btn-primary" id="run">Run ▶</button>
+              <button type="button" class="keys-toggle" id="keys-toggle" aria-expanded="false" aria-controls="keys">API keys <span id="keys-count"></span></button>
+              <span class="run-hint">⌘/Ctrl + Enter</span>
+            </div>
+            <div class="keys" id="keys" hidden>
+              <p class="keys-note">Optional. Add any one key; the router only picks providers you have a key for. Stored in this browser only.</p>
+              <div id="keys-fields"></div>
+              <label class="keys-remember"><input type="checkbox" id="keys-remember"> Remember on this device</label>
+            </div>
           </div>
           <div class="row">
             <div class="field">
@@ -287,6 +298,7 @@ fallbacks: smolvla-450m -> safety-controller</span>
             <div class="badges" id="r-badges"></div>
           </div>
           <div id="r-guard"></div>
+          <div class="answer" id="r-answer" hidden></div>
           <div class="subhead">Candidates</div>
           <div class="bars" id="r-bars"></div>
           <div class="subhead">Trace</div>

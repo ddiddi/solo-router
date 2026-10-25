@@ -41,6 +41,7 @@ class RouteResult:
     location: str
     base_url: str | None
     api_format: str | None
+    provider: str | None
     est_latency_ms: float
     signals: dict[str, Any]
     guardrails: dict[str, Any]
@@ -135,6 +136,7 @@ class Router:
             location=chosen.location,
             base_url=chosen.base_url,
             api_format=chosen.api_format,
+            provider=chosen.provider,
             est_latency_ms=chosen.p50_latency_ms,
             signals=signals.to_dict(),
             guardrails=guardrails,
@@ -162,6 +164,8 @@ class Router:
         allowed = req.locations if req.locations is not None else DEFAULT_LOCATIONS
         if spec.location not in allowed:
             return f"{spec.location} not reachable"
+        if spec.provider and req.providers is not None and spec.provider not in req.providers:
+            return f"no {spec.provider} API key"
         if spec.runtimes and not set(spec.runtimes) & set(req.client_runtimes):
             return f"needs runtime {' or '.join(spec.runtimes)}"
         if not spec.supports(s.embodiment, self.config.embodiment_families.get(s.embodiment or "")):

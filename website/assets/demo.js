@@ -2,11 +2,13 @@
 // browser router (router.js), then executed by a simulated arm in three.js.
 // Every routing decision is real. In "Run in your browser" mode the router is
 // told it can reach browser compute, picks the ONNX models in the config, and
-// they run for real on the rendered camera frame (see onnx.js).
+// they run for real on the rendered camera frame (see onnx.js). With an API key
+// (set in the playground), a hosted planner writes the plan for real.
 
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
+import { complete, enabledProviders, loadKeys } from "./providers.js";
 
 const TASK = "put the red cube in the bowl";
 const REQUEST = { instruction: TASK, embodiment: "so101", observations: ["rgb", "wrist_rgb", "proprio"], control_hz: 30 };
@@ -77,7 +79,7 @@ function hudTemplate() {
         <div><span>${j}</span><b data-j="${j}">0°</b><i><em data-jb="${j}"></em></i></div>`).join("")}
       </div>
     </div>
-    <p class="demo-note">Simulated arm and scene; every perceive / reason / act decision comes from the router config the server ships with. <b>Run in your browser</b> routes to ONNX models (Florence-2, Qwen2.5-0.5B) that run on your GPU via WebGPU.</p>
+    <p class="demo-note">Simulated arm and scene; every perceive / reason / act decision comes from the router config the server ships with. <b>Run in your browser</b> routes to ONNX models (Florence-2, Qwen2.5-0.5B) that run on your GPU via WebGPU. Add an OpenAI, Claude or Nebius key in the playground and the planner runs for real.</p>
   </aside>`;
 }
 
@@ -355,7 +357,9 @@ export function mountDemo(root, router) {
 
   const request = () => mode === "browser"
     ? { ...REQUEST, locations: ["browser"], client_runtimes: runtimes }
-    : REQUEST;
+    : { ...REQUEST, providers: enabledProviders(loadKeys().keys) };
+  // Plans from hosted models, keyed by model: the demo loops, so call each provider once.
+  const cloudPlans = new Map();
   const isBrowserModel = (route) => mode === "browser" && route.location === "browser" && router.models[route.model]?.onnx;
   // Resolve a real inference call, but drop its result if the run was aborted meanwhile.
   async function guarded(promise) {
@@ -446,20 +450,46 @@ export function mountDemo(root, router) {
     return plan;
   }
 
-  async function reasonStage(route, targets) {
-    if (!isBrowserModel(route)) {
-      await sleep(Math.min(1800, 500 + route.est_latency_ms * 0.5));
-      return { plan: DEFAULT_PLAN, note: "" };
-    }
-    const spec = router.models[route.model];
+  function planMessages(targets) {
     const seen = Object.keys(targets).join(", ") || "none";
     // One worked example is enough for a 0.5B model to follow the skill format.
-    const messages = [
+    return [
       { role: "system", content: "You plan motions for an SO-101 robot arm. Skills: move_above(obj), grasp(obj), lift(), release(obj), go_home(). Reply with only skill calls, one per line." },
       { role: "user", content: "Objects: red_cube, blue_cube, green_cube, bowl.\nTask: put the green cube in the bowl" },
       { role: "assistant", content: "move_above(green_cube)\ngrasp(green_cube)\nlift()\nmove_above(bowl)\nrelease(bowl)\ngo_home()" },
       { role: "user", content: `Objects: ${seen}.\nTask: ${TASK}` },
     ];
+  }
+
+  async function cloudPlan(route, targets) {
+    const spec = router.models[route.model];
+    const key = loadKeys().keys[spec.provider];
+    const label = router.config.providers[spec.provider].label;
+    const cacheKey = spec.name + ":" + key;
+    if (!cloudPlans.has(cacheKey)) {
+      const t0 = performance.now();
+      cloudPlans.set(cacheKey, complete(router.config, spec, planMessages(targets), key, 200)
+        .then((text) => ({ plan: parsePlan(text), ms: Math.round(performance.now() - t0) })));
+    }
+    try {
+      const { plan, ms } = await guarded(cloudPlans.get(cacheKey));
+      return plan.length
+        ? { plan, note: `${ms} ms · ${label} · your key` }
+        : { plan: DEFAULT_PLAN, note: `${label} output did not parse, using default plan` };
+    } catch (e) {
+      if (e instanceof Aborted) throw e;
+      return { plan: DEFAULT_PLAN, note: e.message };
+    }
+  }
+
+  async function reasonStage(route, targets) {
+    const spec = router.models[route.model];
+    if (mode === "sim" && spec?.provider && loadKeys().keys[spec.provider]) return cloudPlan(route, targets);
+    if (!isBrowserModel(route)) {
+      await sleep(Math.min(1800, 500 + route.est_latency_ms * 0.5));
+      return { plan: DEFAULT_PLAN, note: "" };
+    }
+    const messages = planMessages(targets);
     const meta = stageLi("reason").querySelector(".meta");
     const base = meta.innerHTML;
     let streamed = "";

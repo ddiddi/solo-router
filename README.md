@@ -9,12 +9,21 @@ An open, programmable decision layer for robots and physical AI.
 [Website](https://ddiddi.github.io/solo-router/) ·
 [SO-101 demo](https://ddiddi.github.io/solo-router/demo.html) ·
 [Quick start](#quick-start) ·
+[Providers & keys](#providers-and-api-keys) ·
 [Configuration](#configuration) ·
 [HTTP API](#http-api)
 
 </div>
 
 ---
+
+```bash
+pip install git+https://github.com/ddiddi/solo-router
+export ANTHROPIC_API_KEY=sk-ant-...      # or OPENAI_API_KEY, or NEBIUS_API_KEY
+solo-router run "plan how to clear the table, then wipe it"
+```
+
+One prompt, one command. The router picks the right model among the providers you have keys for, calls it, and falls back if it fails. On the [website](https://ddiddi.github.io/solo-router/#playground) it is one prompt and one click: paste a key, type, press **Run**.
 
 ## About
 
@@ -38,8 +47,8 @@ The bundled pool is grouped by **role**. A task runs through all three, and each
 
 | Role | Onboard | Edge | Cloud | Browser (ONNX) |
 | --- | --- | --- | --- | --- |
-| **Perception** · see | Florence-2-base, SmolVLM2-2.2B | Qwen2.5-VL-7B | — | Florence-2-base on WebGPU / WASM |
-| **Reasoning** · think | SmolLM2-1.7B | Qwen3-8B | Claude Sonnet | Qwen2.5-0.5B on WebGPU / WASM |
+| **Perception** · see | Florence-2-base, SmolVLM2-2.2B | Qwen2.5-VL-7B | `anthropic/claude-sonnet-5-5`, `openai/gpt-5.5` | Florence-2-base on WebGPU / WASM |
+| **Reasoning** · think | SmolLM2-1.7B | Qwen3-8B | `anthropic/claude-sonnet-5-5`, `openai/gpt-5.5`, `nebius/gpt-oss-120b` | Qwen2.5-0.5B on WebGPU / WASM |
 | **Action** · move | ACT (SO-101), SmolVLA, nav policy | π0, GR00T N1.5, OpenVLA | — | scripted IK controller (SO-101 sim) |
 | **Safety** · stop | `safety-controller` (deterministic) | | | |
 
@@ -47,11 +56,60 @@ The bundled pool is grouped by **role**. A task runs through all three, and each
 solo-router models                     # the pool, grouped by role
 solo-router task "put the red cube in the bowl" -e so101 -o rgb,proprio --hz 30
 # [perceive] scene_understanding -> qwen2.5-vl-7b @ edge (~380ms)
-# [reason]   long_horizon_task   -> claude-sonnet-5-5 @ cloud (~2400ms)
+# [reason]   long_horizon_task   -> nebius/gpt-oss-120b @ cloud (~1500ms)
 # [act]      realtime_manipulation -> pi0-3b @ edge (~45ms)
 ```
 
 Specific robots inherit their family's policies (`so101 → arm`, `aloha → bimanual`, `unitree_g1 → humanoid`, …) through `embodiment_families`. Action policies declare `action_chunk`: a chunked policy only has to answer once per chunk, so π0 at 50 steps per call fits a 30 Hz loop that a one-step policy could not.
+
+## Providers and API keys
+
+Cloud models come from hosted providers you bring your own key for, in the spirit of [OpenRouter](https://openrouter.ai): one OpenAI-compatible endpoint, `provider/model` IDs, and automatic fallback across providers.
+
+| Provider | Key | Models | Endpoint |
+| --- | --- | --- | --- |
+| OpenAI | `OPENAI_API_KEY` | `openai/gpt-5.5` | `https://api.openai.com/v1` |
+| Anthropic (Claude) | `ANTHROPIC_API_KEY` | `anthropic/claude-sonnet-5-5` | `https://api.anthropic.com/v1` (Messages API, translated for you) |
+| Nebius Token Factory | `NEBIUS_API_KEY` | `nebius/gpt-oss-120b` (→ `openai/gpt-oss-120b`) | `https://api.tokenfactory.nebius.com/v1` |
+
+**Keys decide routing.** A provider's models are only routable when you have its key. With one key, the router uses that provider for cloud work and the robot's own models for everything else. With none, it stays self-hosted. Each rejected model shows up in the trace as `no <provider> API key`.
+
+```bash
+solo-router providers                                   # which keys are set, which models they unlock
+solo-router route "plan the chore, then tidy up" --providers openai   # route as if you only had an OpenAI key
+solo-router run "why is joint 3 overheating"            # route among hosted providers and call the model
+solo-router serve --proxy                               # OpenAI-compatible router on :8899 using your env keys
+```
+
+Where keys come from:
+
+- **Environment**: the `api_key_env` of each provider (above).
+- **Per request**: an `x-openai-api-key`, `x-anthropic-api-key` or `x-nebius-api-key` header on any `/v1/*` call, so one router can serve several users with their own keys.
+- **Website**: the playground's *API keys* panel. Keys stay in your browser (session storage, or local storage if you tick *Remember*) and go straight to the provider. Nothing passes through a Solo Router server.
+
+Add a provider or a model in `router.yaml`. Models inherit `base_url`, `api_format` and `api_key_env` from their provider; `upstream_model` sets the provider's ID when it differs from the name:
+
+```yaml
+providers:
+  nebius:
+    label: Nebius Token Factory
+    base_url: https://api.tokenfactory.nebius.com/v1
+    api_format: openai          # openai | anthropic
+    api_key_env: NEBIUS_API_KEY
+
+models:
+  - name: nebius/gpt-oss-120b
+    provider: nebius
+    upstream_model: openai/gpt-oss-120b
+    role: reasoning
+    kind: planner
+    location: cloud
+    p50_latency_ms: 1500
+    quality: 0.83
+    cost_per_1k: 0.4
+```
+
+Model IDs and numbers are examples. Check each provider's catalog for the models your account can use, and measure latency yourself.
 
 ## Run models in the browser (ONNX + WebGPU)
 
@@ -74,12 +132,19 @@ Specific robots inherit their family's policies (`so101 → arm`, `aloha → bim
 
 **E-STOP** routes `stop` to the safety controller and freezes the arm mid-motion.
 
+**With an API key** (set in the playground), the reason stage calls the routed hosted planner for real and the arm executes its plan. The demo loops, so each model is called once and its plan reused.
+
 **Run in your browser** re-routes the same task with `locations: ["browser"]`. The router then picks Florence-2 (grounding on the rendered camera frame), Qwen2.5-0.5B (writing the plan) and the scripted IK controller. The first two run for real on your GPU. Detected boxes are ray-cast onto the table to set grasp targets, and a grasp only succeeds if a cube is actually between the jaws. The first run downloads about 850 MB of weights for WebGPU while the simulated demo keeps looping; later runs load from the browser cache. The arm, scene and the default-mode models are simulated.
 
 ## Quick start
 
 ```bash
 pip install git+https://github.com/ddiddi/solo-router
+
+export OPENAI_API_KEY=sk-...                 # any one provider key is enough
+solo-router run "clean the kitchen, then load the dishwasher"
+# [long_horizon_task -> openai/gpt-5.5 @ cloud]
+# 1. ...
 
 solo-router route "pick up the red cup" -e arm -o rgb,proprio --hz 20
 # realtime_manipulation -> pi0-3b @ edge (~45ms)
@@ -92,8 +157,10 @@ solo-router route "clean the kitchen, then load the dishwasher" --network offlin
 # long_horizon_task -> qwen3-8b @ edge (~900ms)
 
 solo-router serve            # dry-run server on :8899
-solo-router serve --proxy    # forward to the configured backends
+solo-router serve --proxy    # forward to the configured backends with your keys
 ```
+
+`run` and `route`/`task` take the same robot flags (`-e`, `-o`, `--hz`, `--network`, `--humans`, `--prefer`, `--providers`). `run` routes among hosted providers by default; add `--local` to include self-hosted onboard and edge endpoints.
 
 Python 3.10+, with PyYAML as the only dependency. The server uses only the standard library, so it runs on the robot.
 
@@ -113,13 +180,14 @@ instruction + robot state
        ▼
  ┌─────────────┐   embodiment support · required cameras · offline → no cloud
  │   Filters   │   p50 latency ≤ budget · max Hz ≥ control rate · safety tier when elevated
+ │             │   provider key present (openai · anthropic · nebius)
  └─────┬───────┘
        ▼
  ┌─────────────┐   static         – first feasible
  │ Algorithms  │   latency_aware  – highest quality that meets the deadline
  └─────┬───────┘   hybrid         – quality / latency / cost weights, cloud penalty on weak links
        ▼
- model @ onboard | edge | cloud  +  guardrails  +  fallbacks → safety-controller
+ model @ onboard | edge | cloud | browser  +  guardrails  +  fallbacks → safety-controller
 ```
 
 ### Signals
@@ -155,7 +223,7 @@ solo-router -c my-fleet.yaml serve --proxy
 models:
   - name: pi0-3b
     kind: vla               # vla | nav | vlm | llm | planner | safety
-    location: edge          # onboard | edge | cloud
+    location: edge          # onboard | edge | cloud | browser
     p50_latency_ms: 45
     max_hz: 50
     quality: 0.82
@@ -174,7 +242,7 @@ decisions:
 
 `when` matches any signal by value or list of values, and accepts `any:` / `all:` for composition. An empty `when` matches everything. A model named `safety-controller` is required.
 
-Models also declare a `role` (perception, reasoning, action, safety). Optional fields include `action_chunk`, `runtimes` and `onnx`. The `pipeline` block defines the stages for `/v1/task`: which signals each stage fixes (`intent`, `horizon`; safety can never be overridden) and whether the control-loop deadline applies.
+Models also declare a `role` (perception, reasoning, action, safety). Optional fields include `provider`, `upstream_model`, `action_chunk`, `runtimes` and `onnx`. The `pipeline` block defines the stages for `/v1/task`: which signals each stage fixes (`intent`, `horizon`; safety can never be overridden) and whether the control-loop deadline applies.
 
 The bundled pool is an example. Latency and quality numbers are illustrative; measure your own and replace them.
 
@@ -186,7 +254,8 @@ The bundled pool is an example. Latency and quality numbers are illustrative; me
 | `POST` | `/v1/actions` | Robot-native. Routes, then forwards `{instruction, observation, guardrails}` to the policy's `/act` |
 | `POST` | `/v1/route` | Decision only, no backend call |
 | `POST` | `/v1/task` | Route every pipeline stage (perceive → reason → act); headers `x-solo-router-{stage}` |
-| `GET` | `/v1/models` | `solo/auto` plus the configured pool |
+| `GET` | `/v1/models` | `solo/auto` plus the configured pool, with `provider` and whether its key is `configured` |
+| `GET` | `/v1/providers` | Providers, their key status and the models each unlocks |
 | `GET` | `/health` | Liveness |
 
 ```bash
@@ -199,11 +268,13 @@ curl localhost:8899/v1/chat/completions -d @examples/chat_hand_me_scissors.json 
 
 Every response includes a `solo_router` object (or `route` for `/v1/actions`) with signals, ranked candidates, rejected models with reasons, guardrails, fallbacks and the trace.
 
-In dry-run mode (the default) chat returns a summary of the decision instead of calling a model. With `--proxy`, chat is forwarded to `api_format: openai` backends and actions to VLA/nav policy servers. Unreachable backends return `502` with the fallback chain; unreachable policies return a `hold` action.
+In dry-run mode (the default) chat returns a summary of the decision instead of calling a model. With `--proxy`, chat goes to the selected model (OpenAI-compatible or Anthropic Messages, translated both ways) and actions go to VLA/nav policy servers. Requests may set `robot.providers` to narrow the providers; in proxy mode the router only routes to providers it holds a key for.
+
+Like OpenRouter, a failed backend falls through to the next model in the chain. The response says which model answered (`x-solo-router-model`, `solo_router.served_by`) and lists failed `attempts`. If every backend fails you get `502` with all attempts; unreachable policies return a `hold` action. Streaming is not supported yet; `stream` is ignored.
 
 ## Website
 
-[`website/`](website/) is a static site deployed to GitHub Pages. Its playground runs [`website/assets/router.js`](website/assets/router.js), a browser port of the router, on [`router-config.json`](website/assets/router-config.json). After changing the YAML, regenerate it:
+[`website/`](website/) is a static site deployed to GitHub Pages. Its playground runs [`website/assets/router.js`](website/assets/router.js), a browser port of the router, on [`router-config.json`](website/assets/router-config.json). Type a prompt and press **Run**: the router picks a model, and with a key in the *API keys* panel, [`providers.js`](website/assets/providers.js) calls OpenAI, Anthropic or Nebius Token Factory straight from your browser. If a provider blocks browser (CORS) requests, the answer box says so; use `solo-router run` instead. Robot-side picks (VLAs, edge models) are re-routed to the hosted models a browser can reach, the same way `solo-router run` does. After changing the YAML, regenerate it:
 
 ```bash
 solo-router export > website/assets/router-config.json

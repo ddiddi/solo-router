@@ -97,6 +97,7 @@ export class Router {
     if (m.name === FAILSAFE) return null;
     const allowed = req.locations ?? DEFAULT_LOCATIONS;
     if (!allowed.includes(m.location)) return `${m.location} not reachable`;
+    if (m.provider && req.providers != null && !req.providers.includes(m.provider)) return `no ${m.provider} API key`;
     if (m.runtimes.length && !m.runtimes.some((r) => (req.client_runtimes || []).includes(r))) return `needs runtime ${m.runtimes.join(" or ")}`;
     const family = this.families[s.embodiment];
     if (s.embodiment && !m.embodiments.includes("*") && !m.embodiments.includes(s.embodiment)
@@ -178,7 +179,7 @@ export class Router {
 
     return {
       decision: decision.name, algorithm: decision.algorithm, model: chosen.name, location: chosen.location,
-      est_latency_ms: chosen.p50_latency_ms, description: chosen.description, kind: chosen.kind, role: chosen.role,
+      provider: chosen.provider || null, est_latency_ms: chosen.p50_latency_ms, description: chosen.description, kind: chosen.kind, role: chosen.role,
       signals: s, guardrails, ranked, fallbacks, rejected, trace,
     };
   }

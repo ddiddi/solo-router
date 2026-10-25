@@ -178,6 +178,29 @@
       "low_battery_pct": 20
     }
   },
+  "providers": {
+    "openai": {
+      "label": "OpenAI",
+      "base_url": "https://api.openai.com/v1",
+      "api_format": "openai",
+      "api_key_env": "OPENAI_API_KEY",
+      "console_url": "https://platform.openai.com/api-keys"
+    },
+    "anthropic": {
+      "label": "Anthropic (Claude)",
+      "base_url": "https://api.anthropic.com/v1",
+      "api_format": "anthropic",
+      "api_key_env": "ANTHROPIC_API_KEY",
+      "console_url": "https://console.anthropic.com/settings/keys"
+    },
+    "nebius": {
+      "label": "Nebius Token Factory",
+      "base_url": "https://api.tokenfactory.nebius.com/v1",
+      "api_format": "openai",
+      "api_key_env": "NEBIUS_API_KEY",
+      "console_url": "https://tokenfactory.nebius.com"
+    }
+  },
   "embodiment_families": {
     "so101": "arm",
     "so100": "arm",
@@ -310,7 +333,8 @@
       "description": "Offline-capable task planner that breaks instructions into skills."
     },
     {
-      "name": "claude-sonnet-5-5",
+      "name": "anthropic/claude-sonnet-5-5",
+      "provider": "anthropic",
       "role": "reasoning",
       "kind": "planner",
       "location": "cloud",
@@ -321,10 +345,38 @@
         "*"
       ],
       "safety_tier": 2,
-      "base_url": "https://api.anthropic.com/v1",
-      "api_format": "anthropic",
-      "api_key_env": "ANTHROPIC_API_KEY",
-      "description": "Frontier cloud model for long-horizon, open-ended planning."
+      "description": "Frontier cloud model for long-horizon, open-ended planning and scene questions."
+    },
+    {
+      "name": "openai/gpt-5.5",
+      "provider": "openai",
+      "role": "reasoning",
+      "kind": "planner",
+      "location": "cloud",
+      "p50_latency_ms": 2400,
+      "quality": 0.93,
+      "cost_per_1k": 3.0,
+      "embodiments": [
+        "*"
+      ],
+      "safety_tier": 2,
+      "description": "OpenAI's frontier model for planning, tool use and image questions."
+    },
+    {
+      "name": "nebius/gpt-oss-120b",
+      "provider": "nebius",
+      "upstream_model": "openai/gpt-oss-120b",
+      "role": "reasoning",
+      "kind": "planner",
+      "location": "cloud",
+      "p50_latency_ms": 1500,
+      "quality": 0.83,
+      "cost_per_1k": 0.4,
+      "embodiments": [
+        "*"
+      ],
+      "safety_tier": 2,
+      "description": "Open-weight 120B reasoning model hosted on Nebius Token Factory. Fast and cheap."
     },
     {
       "name": "qwen2.5-0.5b-web",
@@ -554,7 +606,9 @@
         ]
       },
       "candidates": [
-        "claude-sonnet-5-5",
+        "anthropic/claude-sonnet-5-5",
+        "openai/gpt-5.5",
+        "nebius/gpt-oss-120b",
         "qwen3-8b",
         "smollm2-1.7b",
         "qwen2.5-0.5b-web"
@@ -571,7 +625,8 @@
         "florence-2-base",
         "smolvlm2-2.2b",
         "qwen2.5-vl-7b",
-        "claude-sonnet-5-5",
+        "anthropic/claude-sonnet-5-5",
+        "openai/gpt-5.5",
         "florence-2-base-web"
       ],
       "algorithm": "hybrid"
@@ -585,7 +640,9 @@
       "candidates": [
         "smollm2-1.7b",
         "qwen3-8b",
-        "claude-sonnet-5-5"
+        "anthropic/claude-sonnet-5-5",
+        "openai/gpt-5.5",
+        "nebius/gpt-oss-120b"
       ],
       "algorithm": "hybrid",
       "prefer": "latency"
@@ -597,7 +654,9 @@
       "candidates": [
         "smollm2-1.7b",
         "qwen3-8b",
-        "claude-sonnet-5-5"
+        "anthropic/claude-sonnet-5-5",
+        "openai/gpt-5.5",
+        "nebius/gpt-oss-120b"
       ],
       "algorithm": "hybrid",
       "prefer": "latency"

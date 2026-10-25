@@ -25,6 +25,9 @@ class RobotRequest:
     # when the caller can run ONNX models itself, and list its runtimes in client_runtimes.
     locations: list[str] | None = None
     client_runtimes: list[str] = field(default_factory=list)
+    # Cloud providers the caller has API keys for, e.g. ["openai", "nebius"]. None means every
+    # configured provider; [] means none, so only self-hosted models are routable.
+    providers: list[str] | None = None
     # Signals an orchestrator already knows, e.g. {"intent": "perception"} for a perception stage.
     # Only intent and horizon can be overridden; safety is always computed from the request.
     overrides: dict[str, str] = field(default_factory=dict)

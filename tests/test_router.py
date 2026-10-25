@@ -1,5 +1,6 @@
 import json
 import threading
+import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -100,7 +101,7 @@ def test_browser_models_declare_how_to_load(router):
 def test_elevated_safety_only_restricts_action_models(router):
     r = route(router, "is there a knife on the table", observations=["rgb"])
     assert r.decision == "scene_understanding" and r.signals["safety"] == "elevated"
-    assert r.model != "claude-sonnet-5-5"
+    assert r.location != "cloud"
 
 
 def test_control_rate_filters_slow_policies(router):
@@ -134,13 +135,15 @@ def test_navigation_stays_onboard(router):
 def test_long_horizon_goes_to_cloud_planner_when_online(router):
     r = route(router, "clean the kitchen, then load the dishwasher and finally wipe the counters")
     assert r.decision == "long_horizon_task"
-    assert r.model == "claude-sonnet-5-5"
+    assert r.location == "cloud"
+    r = route(router, "clean the kitchen, then load the dishwasher", preference="quality")
+    assert r.model == "anthropic/claude-sonnet-5-5"
 
 
 def test_offline_never_routes_to_cloud(router):
     r = route(router, "clean the kitchen, then load the dishwasher", network="offline")
     assert r.location != "cloud"
-    assert r.rejected["claude-sonnet-5-5"] == "robot is offline"
+    assert r.rejected["anthropic/claude-sonnet-5-5"] == "robot is offline"
 
 
 def test_degraded_network_prefers_edge(router):
@@ -151,7 +154,7 @@ def test_degraded_network_prefers_edge(router):
 def test_tight_budget_excludes_cloud(router):
     r = route(router, "what do you see on the shelf", observations=["rgb"], latency_budget_ms=400)
     assert r.location != "cloud"
-    assert "claude-sonnet-5-5" in r.rejected
+    assert "anthropic/claude-sonnet-5-5" in r.rejected
 
 
 def test_conversation_and_diagnostics_stay_local(router):
@@ -219,3 +222,117 @@ def test_http_server_end_to_end(router):
             assert [s["stage"] for s in json.loads(resp.read())["stages"]] == ["perceive", "reason", "act"]
     finally:
         httpd.shutdown()
+
+
+CHORE = "clean the kitchen, then load the dishwasher and finally wipe the counters"
+
+
+@pytest.mark.parametrize("provider, model", [
+    ("openai", "openai/gpt-5.5"), ("anthropic", "anthropic/claude-sonnet-5-5"), ("nebius", "nebius/gpt-oss-120b"),
+])
+def test_one_provider_key_routes_to_that_provider(router, provider, model):
+    r = route(router, CHORE, providers=[provider])
+    assert r.model == model and r.provider == provider
+    others = {m.name for m in router.config.models.values() if m.provider and m.provider != provider}
+    assert all(r.rejected[o] == f"no {router.config.models[o].provider} API key" for o in others)
+
+
+def test_no_provider_keys_stays_self_hosted(router):
+    r = route(router, CHORE, providers=[])
+    assert r.model == "qwen3-8b" and r.provider is None
+
+
+def test_providers_fill_model_endpoints(router):
+    m = router.config.models["nebius/gpt-oss-120b"]
+    assert m.base_url == "https://api.tokenfactory.nebius.com/v1" and m.api_format == "openai"
+    assert m.api_key_env == "NEBIUS_API_KEY" and m.upstream_id == "openai/gpt-oss-120b"
+    assert router.config.models["anthropic/claude-sonnet-5-5"].upstream_id == "claude-sonnet-5-5"
+
+
+def test_config_rejects_unknown_provider():
+    with pytest.raises(ConfigError, match="unknown provider"):
+        RouterConfig.from_dict({"models": [{"name": "x", "kind": "llm", "role": "reasoning", "location": "cloud",
+                                            "p50_latency_ms": 1, "quality": 1, "provider": "nope"}]})
+
+
+def test_openai_body_translates_to_anthropic():
+    from solo_router.server import _from_anthropic, _to_anthropic
+
+    body = _to_anthropic({"messages": [
+        {"role": "system", "content": "plan for a robot"},
+        {"role": "user", "content": [{"type": "text", "text": "what is this"},
+                                     {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}]},
+    ], "temperature": 0}, "claude-sonnet-5-5")
+    assert body["system"] == "plan for a robot" and body["max_tokens"] == 1024 and body["temperature"] == 0
+    assert body["messages"][0]["content"][1]["source"] == {"type": "base64", "media_type": "image/png", "data": "AAAA"}
+    out = _from_anthropic({"id": "msg_1", "content": [{"type": "text", "text": "a cube"}], "stop_reason": "end_turn",
+                           "usage": {"input_tokens": 3, "output_tokens": 2}})
+    assert out["choices"][0]["message"]["content"] == "a cube" and out["usage"]["total_tokens"] == 5
+
+
+def _serve(handler_cls):
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler_cls)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    return httpd, f"http://127.0.0.1:{httpd.server_address[1]}"
+
+
+def test_proxy_uses_provider_key_and_falls_back(monkeypatch):
+    from http.server import BaseHTTPRequestHandler
+
+    seen = []
+
+    class Upstream(BaseHTTPRequestHandler):
+        def do_POST(self):  # noqa: N802
+            body = json.loads(self.rfile.read(int(self.headers["content-length"])))
+            seen.append((self.path, body.get("model"), self.headers.get("authorization")))
+            if body.get("model") == "gpt-5.5":
+                self.send_response(500)
+                self.end_headers()
+                return
+            data = json.dumps({"id": "x", "object": "chat.completion", "choices": [
+                {"index": 0, "message": {"role": "assistant", "content": "plan"}}]}).encode()
+            self.send_response(200)
+            self.send_header("content-length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, *a):
+            pass
+
+    up, up_url = _serve(Upstream)
+    data = load_config(default_config_path()).raw
+    data = {**data, "providers": {k: {**v, "base_url": up_url} for k, v in data["providers"].items()}}
+    monkeypatch.setenv("SOLO_ROUTER_QUIET", "1")
+    for env in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "NEBIUS_API_KEY"):
+        monkeypatch.delenv(env, raising=False)
+    app = App(Router(RouterConfig.from_dict(data)), dry_run=False, keys={"openai": "sk-test"})
+    httpd, base = _serve(make_handler(app))
+    try:
+        body = json.dumps({"model": "solo/auto", "messages": [{"role": "user", "content": CHORE}]}).encode()
+        req = urllib.request.Request(base + "/v1/chat/completions", data=body,
+                                     headers={"x-nebius-api-key": "nb-test"})
+        with urllib.request.urlopen(req) as resp:
+            payload = json.loads(resp.read())
+            served = resp.headers["x-solo-router-model"]
+        # Only keyed providers are routable; Nebius ranks first but its request comes from the header.
+        assert payload["solo_router"]["model"] == "nebius/gpt-oss-120b"
+        assert served == "nebius/gpt-oss-120b"
+        assert seen[0] == ("/chat/completions", "openai/gpt-oss-120b", "Bearer nb-test")
+        assert "anthropic/claude-sonnet-5-5" in payload["solo_router"]["rejected"]
+
+        # Without the Nebius header, OpenAI is chosen; it fails, so the chain falls back through
+        # the self-hosted models (unreachable here) and reports every attempt.
+        seen.clear()
+        req = urllib.request.Request(base + "/v1/chat/completions", data=body)
+        with pytest.raises(urllib.error.HTTPError) as err:
+            urllib.request.urlopen(req)
+        payload = json.loads(err.value.read())
+        assert seen[0] == ("/chat/completions", "gpt-5.5", "Bearer sk-test")
+        assert [a["model"] for a in payload["error"]["attempts"]][:2] == ["openai/gpt-5.5", "qwen3-8b"]
+
+        with urllib.request.urlopen(base + "/v1/providers") as resp:
+            provs = {p["id"]: p["configured"] for p in json.loads(resp.read())["data"]}
+        assert provs == {"openai": True, "anthropic": False, "nebius": False}
+    finally:
+        httpd.shutdown()
+        up.shutdown()
