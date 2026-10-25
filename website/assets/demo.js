@@ -51,7 +51,7 @@ function hudTemplate() {
     <div class="demo-controls">
       <button type="button" class="demo-btn estop" data-act="estop">E-STOP</button>
       <button type="button" class="demo-btn" data-act="replay">Replay</button>
-      <button type="button" class="demo-btn onnx" data-act="onnx" aria-pressed="false" title="Downloads Florence-2 and Qwen2.5-0.5B as ONNX (a few hundred MB, cached) and runs them on WebGPU, or WASM without it">Run in your browser</button>
+      <button type="button" class="demo-btn onnx" data-act="onnx" aria-pressed="false" title="Downloads Florence-2 and Qwen2.5-0.5B as ONNX (about 850 MB on WebGPU, cached after the first run) and runs them on WebGPU, or WASM without it">Run in your browser</button>
     </div>
     <div class="demo-banner" hidden></div>
   </div>
@@ -611,12 +611,14 @@ export function mountDemo(root, router) {
   let detectRuntimes, BrowserModels;
   onnxBtn.onclick = () => {
     if (mode === "browser") { setMode("sim"); abortAll(); return; }
+    // Download in the background while the simulated run keeps looping, then
+    // restart the task in browser mode once the weights are ready.
     onnxBtn.disabled = true;
-    abortAll();
-    gate = (async () => {
+    (async () => {
       try {
         ({ detectRuntimes, BrowserModels } = await import("./onnx.js"));
         await enableBrowser();
+        abortAll();
       } catch (e) {
         console.error(e);
         flash(`Could not run models in this browser: ${e.message}`);
