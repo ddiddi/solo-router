@@ -1,0 +1,1 @@
+{"robot":{"embodiment":"arm","observations":["rgb","proprio"],"control_hz":20,"humans_nearby":true},"model":"solo/auto","messages":[{"role":"user","content":"hand me the scissors"}]}

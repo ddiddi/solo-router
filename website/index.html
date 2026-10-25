@@ -1,0 +1,514 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Solo Router</title>
+  <meta name="description" content="An open, programmable decision layer for robots. Solo Router sends every instruction to the right policy — VLA, planner, VLM, or safety controller — across onboard, edge, and cloud compute.">
+  <meta name="theme-color" content="#060D1A">
+  <meta property="og:title" content="Solo Router — a semantic router for robots and physical AI">
+  <meta property="og:description" content="Route every action to the right policy, on the right compute, inside a safety envelope.">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<div class="banner">
+  <span class="live">NEW</span>
+  <span class="banner-text">Solo Router v0.1 — open-source routing for VLAs, planners and safety controllers.</span>
+  <a href="https://github.com/ddiddi/solo-router">Star on GitHub →</a>
+</div>
+
+<header class="nav" id="nav">
+  <div class="container">
+    <a class="logo" href="#" aria-label="Solo Router home">
+      <svg viewBox="0 0 32 32" fill="none" aria-hidden="true">
+        <rect x="1" y="1" width="30" height="30" rx="8" stroke="#1E2A3E" stroke-width="2" fill="#0D1526"/>
+        <circle cx="9" cy="16" r="3" fill="#AD94F9"/>
+        <path d="M12 16h4m0 0 5-6m-5 6 5 6m-5-6h5" stroke="#AD94F9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="23" cy="9" r="2" fill="#3C9CC4"/><circle cx="23" cy="16" r="2" fill="#3C9CC4"/><circle cx="23" cy="23" r="2" fill="#3C9CC4"/>
+      </svg>
+      solo<span>router</span>
+    </a>
+    <nav class="nav-links" aria-label="Main">
+      <a href="#playground">Playground</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#safety">Safety</a>
+      <a href="#research">Research</a>
+      <a href="https://github.com/ddiddi/solo-router#readme">Docs</a>
+      <a href="https://github.com/ddiddi/solo-router">GitHub</a>
+      <span class="divider"></span>
+      <a class="btn btn-primary" href="#playground" style="color:var(--base)">Try the Playground</a>
+    </nav>
+    <button class="nav-burger" id="burger" aria-label="Open menu">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+    </button>
+  </div>
+</header>
+<div class="mobile-menu" id="menu">
+  <button class="close" id="menu-close" aria-label="Close menu">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+  </button>
+  <a href="#playground">Playground</a>
+  <a href="#architecture">Architecture</a>
+  <a href="#safety">Safety</a>
+  <a href="#research">Research</a>
+  <a href="https://github.com/ddiddi/solo-router#readme">Docs</a>
+  <a href="https://github.com/ddiddi/solo-router">GitHub</a>
+</div>
+
+<main>
+  <!-- HERO -->
+  <section class="hero">
+    <div class="grid-bg"></div>
+    <div class="container">
+      <div class="eyebrow"><b>signals → decisions → policies</b><span class="eyebrow-tail"> · the decision layer for physical AI</span></div>
+      <h1>Every action.<br><span class="grad">The right policy.</span></h1>
+      <p class="sub">An open, programmable decision layer for robots. Solo Router sends each instruction to the best-fit VLA, planner, VLM, or safety controller — across onboard, edge, and cloud compute.</p>
+      <div class="ctas">
+        <a class="btn btn-primary btn-lg" href="#playground">Try the Playground →</a>
+        <button class="btn btn-ghost btn-lg btn-cmd" data-copy="pip install git+https://github.com/ddiddi/solo-router">
+          <span class="prompt">$</span> pip install solo-router <span class="copied" hidden>copied</span>
+        </button>
+      </div>
+
+      <div class="marquee" aria-label="Model families Solo Router can route between">
+        <div class="marquee-label">Route between the models your robots already run</div>
+        <div class="marquee-track" id="marquee"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- WHY -->
+  <section class="alt">
+    <div class="container">
+      <div class="section-head reveal">
+        <div class="kicker">Why a router</div>
+        <h2>No single model drives a robot.</h2>
+        <p>A fold, a hallway, a stop command and a ten-step chore need different models, different compute and different deadlines. Today that logic is hard-coded into every robot stack.</p>
+      </div>
+      <div class="cards cards-4">
+        <div class="card reveal">
+          <div class="num">01 · latency</div>
+          <h3>Control loops don't wait</h3>
+          <p>A 30 Hz policy gets 33 ms per step. A cloud round-trip costs seconds. The router knows which models can keep up.</p>
+        </div>
+        <div class="card reveal">
+          <div class="num">02 · location</div>
+          <h3>Networks drop</h3>
+          <p>Warehouses, farms and basements lose Wi-Fi. Offline robots never call the cloud; degraded links prefer the edge.</p>
+        </div>
+        <div class="card reveal">
+          <div class="num">03 · safety</div>
+          <h3>Safety is not a model</h3>
+          <p>"Stop" goes to a deterministic controller in milliseconds, before any learned model sees it. Every route ends in a fail-safe.</p>
+        </div>
+        <div class="card reveal">
+          <div class="num">04 · embodiment</div>
+          <h3>Bodies differ</h3>
+          <p>An arm, a humanoid and a quadruped need different policies. Routing matches each request to models trained for that body.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- INSTALL -->
+  <section id="install">
+    <div class="container">
+      <div class="section-head reveal">
+        <div class="kicker">Install</div>
+        <h2>Get started in one line.</h2>
+      </div>
+      <div class="install reveal">
+        <div style="text-align:center">
+          <div class="tabs" role="tablist">
+            <button class="tab" role="tab" aria-selected="true" data-tab="humans">For humans</button>
+            <button class="tab" role="tab" aria-selected="false" data-tab="agents">For agents</button>
+          </div>
+        </div>
+        <div class="terminal" data-panel="humans">
+          <div class="terminal-bar"><i></i><i></i><i></i><span>bash</span><button class="copy" data-copy-target="cmd-humans">copy</button></div>
+<pre id="cmd-humans"><span class="p">$ </span>pip install git+https://github.com/ddiddi/solo-router
+<span class="p">$ </span>solo-router route <span class="s">"pick up the red cup"</span> <span class="k">-e</span> arm <span class="k">-o</span> rgb,proprio <span class="k">--hz</span> 20
+<span class="c">realtime_manipulation -> pi0-3b @ edge (~45ms)
+fallbacks: smolvla-450m -> safety-controller</span>
+<span class="p">$ </span>solo-router serve            <span class="c"># OpenAI-compatible on :8899</span></pre>
+        </div>
+        <div class="terminal" data-panel="agents" hidden>
+          <div class="terminal-bar"><i></i><i></i><i></i><span>http</span><button class="copy" data-copy-target="cmd-agents">copy</button></div>
+<pre id="cmd-agents"><span class="p">$ </span>curl localhost:8899/v1/chat/completions <span class="k">-d</span> <span class="s">'{
+    "model": "solo/auto",
+    "messages": [{"role": "user", "content": "hand me the scissors"}],
+    "robot": {"embodiment": "arm", "observations": ["rgb"],
+              "control_hz": 20, "humans_nearby": true}
+  }'</span>
+<span class="c"># x-solo-router-decision: realtime_manipulation
+# x-solo-router-model:    pi0-3b
+# x-solo-router-safety:   elevated  (max 0.25 m/s, 20 N)</span></pre>
+        </div>
+        <p class="install-note">Python 3.10+. The server uses only the standard library, so it runs on the robot itself.</p>
+        <div class="ctas">
+          <a class="btn btn-ghost" href="https://github.com/ddiddi/solo-router#quick-start">Installation guide</a>
+          <a class="btn btn-ghost" href="https://github.com/ddiddi/solo-router#readme">Read the docs</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PLAYGROUND -->
+  <section id="playground" class="alt">
+    <div class="container">
+      <div class="section-head reveal">
+        <div class="kicker">Playground</div>
+        <h2>Watch it decide.</h2>
+        <p>The real routing engine, running in your browser on the same config the server ships with. Change the robot, the network or the deadline and see the decision move.</p>
+      </div>
+      <div class="pg">
+        <form class="pg-panel" id="pg-form" onsubmit="return false">
+          <div class="field">
+            <label for="instruction">Instruction</label>
+            <textarea id="instruction" rows="3">pick up the red cup and place it on the tray</textarea>
+            <div class="presets" id="presets"></div>
+          </div>
+          <div class="row">
+            <div class="field">
+              <label for="embodiment">Embodiment</label>
+              <select id="embodiment">
+                <option value="arm">arm</option>
+                <option value="bimanual">bimanual</option>
+                <option value="mobile_manipulator">mobile manipulator</option>
+                <option value="humanoid">humanoid</option>
+                <option value="quadruped">quadruped</option>
+                <option value="amr">AMR</option>
+                <option value="drone">drone</option>
+              </select>
+            </div>
+            <div class="field">
+              <span class="label">Preference</span>
+              <select id="preference" aria-label="Preference">
+                <option value="balanced">balanced</option>
+                <option value="quality">quality</option>
+                <option value="latency">latency</option>
+                <option value="cost">cost</option>
+              </select>
+            </div>
+          </div>
+          <div class="field">
+            <span class="label">Observations</span>
+            <div class="toggles" id="obs">
+              <button type="button" class="toggle" aria-pressed="true" data-v="rgb">rgb</button>
+              <button type="button" class="toggle" aria-pressed="false" data-v="wrist_rgb">wrist_rgb</button>
+              <button type="button" class="toggle" aria-pressed="false" data-v="depth">depth</button>
+              <button type="button" class="toggle" aria-pressed="true" data-v="proprio">proprio</button>
+              <button type="button" class="toggle" aria-pressed="false" data-v="lidar">lidar</button>
+            </div>
+          </div>
+          <div class="field">
+            <label for="hz">Control rate <span class="range-val" id="hz-val"></span></label>
+            <input type="range" id="hz" min="0" max="8" step="1" value="4">
+          </div>
+          <div class="field">
+            <span class="label">Network</span>
+            <div class="seg" id="network">
+              <button type="button" aria-pressed="true" data-v="online">online</button>
+              <button type="button" aria-pressed="false" data-v="degraded">degraded</button>
+              <button type="button" aria-pressed="false" data-v="offline">offline</button>
+            </div>
+          </div>
+          <div class="field">
+            <label for="battery">Battery <span class="range-val" id="battery-val"></span></label>
+            <input type="range" id="battery" min="5" max="100" step="5" value="80">
+          </div>
+          <div class="field" style="margin-bottom:0">
+            <span class="label">Situation</span>
+            <div class="toggles">
+              <button type="button" class="toggle" id="humans" aria-pressed="false">humans nearby</button>
+              <button type="button" class="toggle danger" id="estop" aria-pressed="false">e-stop pressed</button>
+            </div>
+          </div>
+        </form>
+
+        <div class="pg-panel" aria-live="polite">
+          <div class="pipeline" id="pipeline">
+            <div class="stage"><small>signal</small><b id="st-signal">–</b></div>
+            <div class="stage"><small>decision</small><b id="st-decision">–</b></div>
+            <div class="stage"><small>algorithm</small><b id="st-algo">–</b></div>
+            <div class="stage"><small>backend</small><b id="st-backend">–</b></div>
+          </div>
+          <div class="result-head">
+            <div style="min-width:0">
+              <div class="subhead">Selected policy</div>
+              <div class="result-model" id="r-model">–</div>
+              <div class="result-desc" id="r-desc"></div>
+            </div>
+            <div class="badges" id="r-badges"></div>
+          </div>
+          <div id="r-guard"></div>
+          <div class="subhead">Candidates</div>
+          <div class="bars" id="r-bars"></div>
+          <div class="subhead">Trace</div>
+          <div class="trace" id="r-trace"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ARCHITECTURE -->
+  <section id="architecture">
+    <div class="container">
+      <div class="section-head reveal">
+        <div class="kicker">Architecture</div>
+        <h2>Your robots. Your rules.</h2>
+        <p>Four dimensions decide where an instruction should run. You write them down once, in YAML, and every robot in the fleet follows them.</p>
+      </div>
+      <div class="dims">
+        <div class="card dim reveal">
+          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="8" width="14" height="10" rx="2"/><path d="M12 8V4M9 4h6M9 13h.01M15 13h.01M3 13v2M21 13v2"/></svg></div>
+          <h3>Policies</h3>
+          <p>VLAs for manipulation, navigation policies, VLMs for perception, planners for long tasks.</p>
+          <div class="tags"><span class="tag">π0</span><span class="tag">GR00T</span><span class="tag">SmolVLA</span><span class="tag">OpenVLA</span><span class="tag">Qwen-VL</span></div>
+        </div>
+        <div class="card dim reveal">
+          <div class="icon teal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"/></svg></div>
+          <h3>Compute</h3>
+          <p>Jetson-class boards on the robot, a GPU box on the LAN, or frontier APIs in the cloud.</p>
+          <div class="tags"><span class="tag">onboard</span><span class="tag">edge</span><span class="tag">cloud</span></div>
+        </div>
+        <div class="card dim reveal">
+          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0M1.42 9a16 16 0 0 1 21.16 0M8.53 16.11a6 6 0 0 1 6.95 0M12 20h.01"/></svg></div>
+          <h3>Connectivity</h3>
+          <p>Online, degraded or offline. Cloud is penalized on a weak link and never used without one.</p>
+          <div class="tags"><span class="tag">online</span><span class="tag">degraded</span><span class="tag">offline</span></div>
+        </div>
+        <div class="card dim reveal">
+          <div class="icon teal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></div>
+          <h3>Control loop</h3>
+          <p>A control rate becomes a latency budget. Models that can't meet it are filtered out before scoring.</p>
+          <div class="tags"><span class="tag">realtime</span><span class="tag">interactive</span><span class="tag">deliberative</span></div>
+        </div>
+      </div>
+      <div class="stats">
+        <div class="card stat reveal"><b class="grad" data-stat="signals">9</b><span>signals per request</span></div>
+        <div class="card stat reveal"><b class="grad" data-stat="decisions">7</b><span>decisions by priority</span></div>
+        <div class="card stat reveal"><b class="grad" data-stat="algorithms">3</b><span>selection algorithms</span></div>
+        <div class="card stat reveal"><b class="grad" data-stat="models">10</b><span>policies in the default pool</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- WHERE IT FITS -->
+  <section class="alt">
+    <div class="container">
+      <div class="section-head reveal">
+        <div class="kicker">Where it fits</div>
+        <h2>One frontend. Every policy behind it.</h2>
+        <p>Robots talk to one endpoint. The decision engine picks the policy; the pool runs it wherever it lives.</p>
+      </div>
+      <div class="flow reveal">
+        <div class="layer">
+          <h3>Frontend</h3>
+          <p>OpenAI-compatible, plus robot-native routes.</p>
+          <ul>
+            <li><code>/v1/chat/completions</code><small>chat</small></li>
+            <li><code>/v1/actions</code><small>policy</small></li>
+            <li><code>/v1/route</code><small>decide only</small></li>
+            <li><code>/v1/models</code><small>catalog</small></li>
+          </ul>
+        </div>
+        <div class="arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14m-6-6 6 6-6 6"/></svg></div>
+        <div class="layer core">
+          <h3>Decision engine</h3>
+          <p>Deterministic, explainable, and traced on every request.</p>
+          <div class="steps">
+            <div>Signals<small>9 types</small></div>
+            <div>Decisions<small>priority</small></div>
+            <div>Filters<small>hard limits</small></div>
+            <div>Algorithms<small>score</small></div>
+          </div>
+          <ul style="margin-top:12px">
+            <li>intent · horizon · safety<small>what</small></li>
+            <li>embodiment · modalities<small>who</small></li>
+            <li>latency · network · battery<small>constraints</small></li>
+          </ul>
+        </div>
+        <div class="arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14m-6-6 6 6-6 6"/></svg></div>
+        <div class="layer">
+          <h3>Policy pool</h3>
+          <p>Wherever each model runs best.</p>
+          <ul>
+            <li>safety-controller<small>onboard</small></li>
+            <li>smolvla · nav-policy<small>onboard</small></li>
+            <li>π0 · GR00T · Qwen-VL<small>edge</small></li>
+            <li>frontier planner<small>cloud</small></li>
+          </ul>
+        </div>
+      </div>
+      <div class="cards cards-2 modes">
+        <div class="card mode reveal">
+          <h3>Dry-run mode</h3>
+          <p>Returns the decision and trace without calling any backend. Use it on a laptop, in CI, or to audit a new policy before it touches hardware.</p>
+          <pre><span class="p">$ </span>solo-router serve</pre>
+        </div>
+        <div class="card mode reveal">
+          <h3>Proxy mode</h3>
+          <p>Forwards chat to OpenAI-compatible backends and observations to policy servers' <code>/act</code>. Falls back down the chain if a backend is unreachable.</p>
+          <pre><span class="p">$ </span>solo-router serve --proxy</pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SAFETY -->
+  <section id="safety">
+    <div class="container split">
+      <div class="reveal">
+        <div class="section-head">
+          <div class="kicker">Safety envelope</div>
+          <h2>Your robot. Your safety envelope.</h2>
+          <p>Routing is where safety policy belongs: before any model runs, in code you can read.</p>
+        </div>
+        <ul class="checks">
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span><b>Stop preempts everything.</b> "Stop", "halt" and e-stop flags go to a deterministic controller at the highest priority.</span></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span><b>Elevated risk tightens limits.</b> Knives, heat or people nearby cap speed and force, and only higher-tier policies stay eligible.</span></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span><b>Every chain ends in a fail-safe.</b> If no policy qualifies, the robot holds position instead of guessing.</span></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span><b>Data stays where you put it.</b> Offline robots never route to the cloud. Camera frames go only to models you list.</span></li>
+        </ul>
+        <a class="btn btn-ghost" href="https://github.com/ddiddi/solo-router/blob/main/src/solo_router/router.yaml">Explore routing policies →</a>
+      </div>
+      <div class="envelope reveal" aria-hidden="true">
+        <svg viewBox="0 0 480 480" fill="none">
+          <defs>
+            <radialGradient id="glow" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#8369E4" stop-opacity=".35"/><stop offset="1" stop-color="#8369E4" stop-opacity="0"/></radialGradient>
+          </defs>
+          <circle cx="240" cy="240" r="220" fill="url(#glow)"/>
+          <circle cx="240" cy="240" r="210" stroke="#3C9CC4" stroke-opacity=".35" stroke-dasharray="4 8"/>
+          <circle cx="240" cy="240" r="150" stroke="#FBBF24" stroke-opacity=".45" stroke-dasharray="2 6"/>
+          <circle cx="240" cy="240" r="84" stroke="#F87171" stroke-opacity=".6"/>
+          <circle class="ring-pulse" cx="240" cy="240" r="84" stroke="#AD94F9" stroke-width="2"/>
+          <rect x="200" y="200" width="80" height="80" rx="18" fill="#0D1526" stroke="#AD94F9" stroke-width="2"/>
+          <path d="M226 252v-14a14 14 0 0 1 28 0v14M222 252h36" stroke="#AD94F9" stroke-width="3" stroke-linecap="round"/>
+          <text x="240" y="70" fill="#3C9CC4" font-family="JetBrains Mono" font-size="12" text-anchor="middle">cloud · offline-aware</text>
+          <text x="240" y="132" fill="#FBBF24" font-family="JetBrains Mono" font-size="12" text-anchor="middle">elevated · 0.25 m/s · 20 N</text>
+          <text x="240" y="186" fill="#F87171" font-family="JetBrains Mono" font-size="12" text-anchor="middle">critical · stop</text>
+          <g font-family="DM Sans" font-size="13" fill="#8B92A0">
+            <rect x="34" y="300" width="104" height="30" rx="15" fill="#0D1526" stroke="#1E2A3E"/><text x="86" y="320" text-anchor="middle">humans nearby</text>
+            <rect x="350" y="280" width="90" height="30" rx="15" fill="#0D1526" stroke="#1E2A3E"/><text x="395" y="300" text-anchor="middle">knife, hot</text>
+            <rect x="300" y="390" width="96" height="30" rx="15" fill="#0D1526" stroke="#1E2A3E"/><text x="348" y="410" text-anchor="middle">e-stop</text>
+            <rect x="70" y="400" width="104" height="30" rx="15" fill="#0D1526" stroke="#1E2A3E"/><text x="122" y="420" text-anchor="middle">wifi dropped</text>
+          </g>
+        </svg>
+      </div>
+    </div>
+  </section>
+
+  <!-- RESEARCH -->
+  <section id="research" class="alt">
+    <div class="container">
+      <div class="section-head reveal">
+        <div class="kicker">Research</div>
+        <h2>Papers behind the router.</h2>
+        <p>Solo Router applies signal-driven routing from LLM serving to the policies that move robots.</p>
+      </div>
+      <div class="papers reveal">
+        <a class="paper featured" href="https://arxiv.org/abs/2510.08731"><div><b>When to Reason: Semantic Router for vLLM</b><span>The signal → decision routing design this project adapts for robots</span></div><em>arXiv 2510.08731</em></a>
+        <a class="paper" href="https://arxiv.org/abs/2410.24164"><div><b>π0: A Vision-Language-Action Flow Model for General Robot Control</b><span>Physical Intelligence</span></div><em>arXiv 2410.24164</em></a>
+        <a class="paper" href="https://arxiv.org/abs/2503.14734"><div><b>GR00T N1: An Open Foundation Model for Generalist Humanoid Robots</b><span>NVIDIA</span></div><em>arXiv 2503.14734</em></a>
+        <a class="paper" href="https://arxiv.org/abs/2506.01844"><div><b>SmolVLA: A Vision-Language-Action Model for Affordable and Efficient Robotics</b><span>Hugging Face</span></div><em>arXiv 2506.01844</em></a>
+        <a class="paper" href="https://arxiv.org/abs/2406.09246"><div><b>OpenVLA: An Open-Source Vision-Language-Action Model</b><span>Stanford, UC Berkeley, TRI, Google DeepMind and others</span></div><em>arXiv 2406.09246</em></a>
+        <a class="paper" href="https://arxiv.org/abs/2405.12213"><div><b>Octo: An Open-Source Generalist Robot Policy</b><span>Octo Model Team</span></div><em>arXiv 2405.12213</em></a>
+        <a class="paper" href="https://arxiv.org/abs/2307.15818"><div><b>RT-2: Vision-Language-Action Models Transfer Web Knowledge to Robotic Control</b><span>Google DeepMind</span></div><em>arXiv 2307.15818</em></a>
+      </div>
+    </div>
+  </section>
+
+  <!-- OSS -->
+  <section>
+    <div class="container">
+      <div class="section-head reveal">
+        <div class="kicker">Open source</div>
+        <h2>Built with open source.</h2>
+      </div>
+      <div class="oss reveal">
+        <a href="https://github.com/vllm-project/semantic-router"><b>vLLM Semantic Router</b><span>The architecture we build on</span></a>
+        <a href="https://github.com/huggingface/lerobot"><b>LeRobot</b><span>Datasets and policies</span></a>
+        <a href="https://github.com/vllm-project/vllm"><b>vLLM</b><span>Serving VLMs and planners</span></a>
+        <a href="https://www.ros.org/"><b>ROS 2</b><span>Robot middleware</span></a>
+        <a href="https://pytorch.org/"><b>PyTorch</b><span>Policy runtimes</span></a>
+        <a href="https://huggingface.co/"><b>Hugging Face</b><span>Model hub</span></a>
+        <a href="https://github.com/GetSoloTech/solo-cli"><b>Solo CLI</b><span>Train and deploy on robots</span></a>
+        <a href="https://yaml.org/"><b>PyYAML</b><span>The router's only dependency</span></a>
+      </div>
+    </div>
+  </section>
+
+  <!-- CLOSING -->
+  <section class="closing alt">
+    <div class="container">
+      <h2 class="reveal">Make every action <span class="grad">count.</span></h2>
+      <div class="cards cards-2">
+        <a class="card reveal" href="#playground">
+          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 3 14 9-14 9V3z"/></svg></div>
+          <h3>Try the Playground</h3>
+          <p>Route instructions for an arm, a humanoid or a drone and read every step of the decision.</p>
+          <span class="go">Open playground →</span>
+        </a>
+        <a class="card reveal" href="https://github.com/ddiddi/solo-router#quick-start">
+          <div class="icon teal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m4 17 6-6-6-6M12 19h8"/></svg></div>
+          <h3>Run it on your robot</h3>
+          <p>One pip install, one YAML file. Point your robot stack at <code>solo/auto</code> and go.</p>
+          <span class="go">Quick start →</span>
+        </a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="container">
+    <div class="foot">
+      <div>
+        <a class="logo" href="#">
+          <svg viewBox="0 0 32 32" fill="none" aria-hidden="true"><rect x="1" y="1" width="30" height="30" rx="8" stroke="#1E2A3E" stroke-width="2" fill="#0D1526"/><circle cx="9" cy="16" r="3" fill="#AD94F9"/><path d="M12 16h4m0 0 5-6m-5 6 5 6m-5-6h5" stroke="#AD94F9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="23" cy="9" r="2" fill="#3C9CC4"/><circle cx="23" cy="16" r="2" fill="#3C9CC4"/><circle cx="23" cy="23" r="2" fill="#3C9CC4"/></svg>
+          solo<span>router</span>
+        </a>
+        <p>The open decision layer for robots and physical AI. Apache-2.0.</p>
+      </div>
+      <div>
+        <h4>Documentation</h4>
+        <ul>
+          <li><a href="https://github.com/ddiddi/solo-router#readme">Introduction</a></li>
+          <li><a href="https://github.com/ddiddi/solo-router#quick-start">Quick start</a></li>
+          <li><a href="https://github.com/ddiddi/solo-router#configuration">Configuration</a></li>
+          <li><a href="https://github.com/ddiddi/solo-router#http-api">HTTP API</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Community</h4>
+        <ul>
+          <li><a href="https://github.com/ddiddi/solo-router">GitHub</a></li>
+          <li><a href="https://github.com/ddiddi/solo-router/issues">Issues</a></li>
+          <li><a href="https://github.com/vllm-project/semantic-router">vLLM Semantic Router</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>More</h4>
+        <ul>
+          <li><a href="#research">Research</a></li>
+          <li><a href="https://www.getsolo.tech/">Solo</a></li>
+          <li><a href="https://github.com/ddiddi/solo-router/blob/main/LICENSE">License</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="copyright">
+      <span>© 2026 Solo Router contributors</span>
+      <span>Inspired by vLLM Semantic Router (Apache-2.0)</span>
+    </div>
+  </div>
+</footer>
+
+<script type="module" src="assets/app.js"></script>
+</body>
+</html>

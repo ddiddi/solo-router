@@ -1,0 +1,240 @@
+version: v0.1
+
+# Solo Router: a semantic decision layer for robots.
+# Every request flows through four stages:
+#   signals   -> what is being asked, by which robot, under which constraints
+#   decisions -> which policy family should handle it (first match by priority)
+#   algorithms-> which concrete model within that family, given latency/location/safety
+#   backends  -> where the chosen model runs (onboard, edge, cloud)
+
+listener:
+  address: 0.0.0.0
+  port: 8899
+  # When true, /v1/chat/completions and /v1/actions return the routing decision
+  # without calling the selected backend. Handy for testing on a laptop.
+  dry_run: true
+
+signals:
+  intent:
+    # Keyword lexicon per intent. Whole-word/phrase matches on the lowercased
+    # instruction; the highest score wins, ties go to the earlier intent.
+    manipulation: [pick, pick up, place, put, grasp, grab, hold, release, fold, pour, open, close,
+                   insert, stack, wipe, push, pull, twist, screw, unscrew, hand me, lift, drop,
+                   sort, peg, drawer, cup, towel, block, gripper]
+    navigation: [go to, navigate, move to, drive, walk, follow, dock, return to, explore, patrol,
+                 map, turn left, turn right, come here, go back, waypoint, hallway, room, aisle]
+    perception: [what do you see, describe, detect, count, inspect, identify, find, where is,
+                 look at, read the, recognize, check if, is there, scan, gauge, label]
+    planning: [plan, steps, sequence, clean the, set the table, organize, tidy, prepare, cook,
+               make me, assemble, unload, load the dishwasher, do the laundry, then, after that]
+    diagnostics: [error, fault, joint, torque, overheating, overheat, calibrate, calibration,
+                  battery, log, logs, motor, diagnose, diagnostic, firmware, encoder, status]
+    conversation: [hello, hi, explain, why, how are you, tell me, what can you do, who are you,
+                   thanks, thank you]
+  horizon:
+    # Instructions with at least this many sequencing markers ("then", "after that", "finally", commas)
+    # or this many words are treated as long-horizon tasks that need a planner.
+    long_markers: 2
+    long_words: 24
+    markers: [then, after that, afterwards, next, finally, and then]
+  safety:
+    critical_patterns:
+      - '^\s*(stop|halt|freeze|abort)\s*[!.]*\s*$'
+      - '\bemergency\b'
+      - '\be-?stop\b'
+      - '\bstop (now|immediately|moving|everything)\b'
+    hazard_words: [knife, blade, scissors, hot, boiling, stove, oven, chemical, bleach, glass,
+                   child, baby, kid, fire, sharp, needle, person, someone, face]
+  latency:
+    realtime_ms: 50       # tighter than this: only onboard reactive policies
+    interactive_ms: 500   # tighter than this: no cloud round trips
+  energy:
+    low_battery_pct: 20
+
+models:
+  - name: safety-controller
+    kind: safety
+    location: onboard
+    p50_latency_ms: 2
+    max_hz: 1000
+    quality: 1.0
+    cost_per_1k: 0
+    embodiments: ["*"]
+    requires: []
+    safety_tier: 3
+    description: Deterministic stop / hold-position controller. Never a learned model.
+
+  - name: smolvla-450m
+    kind: vla
+    location: onboard
+    p50_latency_ms: 28
+    max_hz: 30
+    quality: 0.62
+    cost_per_1k: 0
+    power_w: 15
+    embodiments: [arm, bimanual]
+    requires: [rgb]
+    safety_tier: 1
+    base_url: http://127.0.0.1:8101
+    description: Compact vision-language-action policy that fits on a Jetson-class board.
+
+  - name: pi0-3b
+    kind: vla
+    location: edge
+    p50_latency_ms: 45
+    max_hz: 50
+    quality: 0.82
+    cost_per_1k: 0.02
+    power_w: 0
+    embodiments: [arm, bimanual, mobile_manipulator]
+    requires: [rgb]
+    safety_tier: 2
+    base_url: http://edge.local:8102
+    description: Flow-matching VLA with action chunking for dexterous manipulation.
+
+  - name: openvla-7b
+    kind: vla
+    location: edge
+    p50_latency_ms: 170
+    max_hz: 6
+    quality: 0.70
+    cost_per_1k: 0.03
+    embodiments: [arm]
+    requires: [rgb]
+    safety_tier: 1
+    base_url: http://edge.local:8103
+    description: Open 7B VLA; strong generalization, slower control rate.
+
+  - name: gr00t-n1.5-3b
+    kind: vla
+    location: edge
+    p50_latency_ms: 40
+    max_hz: 30
+    quality: 0.80
+    cost_per_1k: 0.02
+    embodiments: [humanoid, bimanual]
+    requires: [rgb]
+    safety_tier: 2
+    base_url: http://edge.local:8104
+    description: Humanoid foundation policy for whole-body and bimanual tasks.
+
+  - name: nav-policy-onboard
+    kind: nav
+    location: onboard
+    p50_latency_ms: 18
+    max_hz: 50
+    quality: 0.66
+    cost_per_1k: 0
+    power_w: 10
+    embodiments: [mobile_manipulator, amr, quadruped, humanoid, drone]
+    requires: []
+    safety_tier: 2
+    base_url: http://127.0.0.1:8105
+    description: Goal-conditioned visual navigation policy running on the robot.
+
+  - name: qwen2.5-vl-7b
+    kind: vlm
+    location: edge
+    p50_latency_ms: 380
+    quality: 0.76
+    cost_per_1k: 0.05
+    embodiments: ["*"]
+    requires: [rgb]
+    safety_tier: 1
+    base_url: http://edge.local:8000/v1
+    api_format: openai
+    description: Open VLM for scene description, detection, and gauge reading on the edge box.
+
+  - name: smollm2-1.7b
+    kind: llm
+    location: onboard
+    p50_latency_ms: 140
+    quality: 0.50
+    cost_per_1k: 0
+    power_w: 8
+    embodiments: ["*"]
+    requires: []
+    safety_tier: 1
+    base_url: http://127.0.0.1:8106/v1
+    api_format: openai
+    description: Small language model for chat, status, and log triage without a network.
+
+  - name: qwen3-8b
+    kind: planner
+    location: edge
+    p50_latency_ms: 900
+    quality: 0.72
+    cost_per_1k: 0.08
+    embodiments: ["*"]
+    requires: []
+    safety_tier: 1
+    base_url: http://edge.local:8001/v1
+    api_format: openai
+    description: Offline-capable task planner that decomposes instructions into skills.
+
+  - name: claude-sonnet-5-5
+    kind: planner
+    location: cloud
+    p50_latency_ms: 2400
+    quality: 0.95
+    cost_per_1k: 4.0
+    embodiments: ["*"]
+    requires: []
+    safety_tier: 2
+    base_url: https://api.anthropic.com/v1
+    api_format: anthropic
+    api_key_env: ANTHROPIC_API_KEY
+    description: Frontier cloud planner for long-horizon, open-ended tasks.
+
+decisions:
+  - name: emergency_stop
+    priority: 1000
+    when: { safety: critical }
+    candidates: [safety-controller]
+    algorithm: static
+
+  - name: realtime_manipulation
+    priority: 300
+    when: { intent: manipulation, horizon: short }
+    candidates: [pi0-3b, gr00t-n1.5-3b, smolvla-450m, openvla-7b]
+    algorithm: latency_aware
+
+  - name: navigation
+    priority: 290
+    when: { intent: navigation, horizon: short }
+    candidates: [nav-policy-onboard]
+    algorithm: latency_aware
+
+  - name: long_horizon_task
+    priority: 200
+    when: { any: [{ intent: planning }, { horizon: long }] }
+    candidates: [claude-sonnet-5-5, qwen3-8b, smollm2-1.7b]
+    algorithm: hybrid
+
+  - name: scene_understanding
+    priority: 150
+    when: { intent: perception }
+    candidates: [qwen2.5-vl-7b, claude-sonnet-5-5]
+    algorithm: hybrid
+
+  - name: diagnostics
+    priority: 120
+    when: { intent: diagnostics }
+    candidates: [smollm2-1.7b, qwen3-8b, claude-sonnet-5-5]
+    algorithm: hybrid
+    prefer: latency
+
+  - name: conversation
+    priority: 0
+    when: {}
+    candidates: [smollm2-1.7b, qwen3-8b, claude-sonnet-5-5]
+    algorithm: hybrid
+    prefer: latency
+
+guardrails:
+  # Attached to any decision whose safety signal is "elevated".
+  elevated:
+    max_speed_mps: 0.25
+    max_force_n: 20
+    min_safety_tier: 2
+    require_confirmation: false
